@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const projectRoot = fileURLToPath(new URL('../', import.meta.url));
-export const sourceFiles = ['app.js', 'audio.js', 'style.css'];
+export const sourceFiles = ['app.js', 'audio.js', 'sprite-parts.js', 'style.css'];
 
 export async function listFiles(directory, prefix = '') {
   const entries = await readdir(directory, { withFileTypes: true });

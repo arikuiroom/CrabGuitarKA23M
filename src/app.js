@@ -1,4 +1,5 @@
 import {GuitarAudio} from './audio.js?v=18';
+import {mountSpriteParts, SPRITE_URLS, SPRITE_HIT_REGIONS} from './sprite-parts.js?v=19';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const audio=new GuitarAudio();
 const bases=[82.406889,110,146.832384,195.997718,246.941651,329.627557];
@@ -7,6 +8,8 @@ const chords={open:[0,0,0,0,0,0],C:[null,3,2,0,1,0],G:[3,2,0,0,0,3],Am:[null,0,2
 let chord='open',muted=false, plucks=0, playEpoch=0, armPointer=null;
 const pointers=new Map(), keys=new Set(), flashes=new Map(), palmPointers=new Set();
 const board=$('#stringboard'), instrument=$('#instrument'), scene=$('.scene');
+mountSpriteParts(instrument);
+const {palm: palmRegion, arm: armRegion}=SPRITE_HIT_REGIONS;
 const midiName=f=>['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'][(Math.round(69+12*Math.log2(f/440))%12+12)%12];
 for(let i=0;i<6;i++){
  const b=document.createElement('button');b.className='string-button';b.dataset.string=i;b.style.setProperty('--thickness',`${3-i*.36}px`);b.innerHTML=`<span class="note">${names[i]}</span><span class="wire"></span><span class="number">${6-i}</span>`;b.setAttribute('aria-label',`${6-i}弦 ${names[i]}を弾く`);board.append(b);
@@ -23,7 +26,7 @@ function instrumentPosition(e){
  const screenX=matrix.a*ux+matrix.c*uy,screenY=matrix.b*ux+matrix.d*uy,length=Math.hypot(screenX,screenY),orientation=Math.sign(matrix.a*matrix.d-matrix.b*matrix.c)||1;
  // Test the actual rendered line equations, including their slightly tapered spacing.
  const sides=Array.from({length:6},(_,i)=>(887-4.6*i)*(y-684-19.6*i)-(-370-.2*i)*(x-635-11.4*i));
- return {value,t,x,y,sides,normalX:-screenY/length*orientation,normalY:screenX/length*orientation,tangentX:screenX/length,tangentY:screenY/length,arm:((armPoint.x-974)/90)**2+((armPoint.y-857)/50)**2<=1,along:t>=-.03&&t<=1.04,harmonic:scene.dataset.preset!=='redbrown'&&t>=.76&&t<=.98,palm:((x-390)/120)**2+((y-420)/105)**2<=1,inside:t>=-.03&&t<=1.04&&value>=-2.75&&value<=7.75};
+ return {value,t,x,y,sides,normalX:-screenY/length*orientation,normalY:screenX/length*orientation,tangentX:screenX/length,tangentY:screenY/length,arm:((armPoint.x-armRegion.x)/armRegion.rx)**2+((armPoint.y-armRegion.y)/armRegion.ry)**2<=1,along:t>=-.03&&t<=1.04,harmonic:scene.dataset.preset!=='redbrown'&&t>=.76&&t<=.98,palm:((x-palmRegion.x)/palmRegion.rx)**2+((y-palmRegion.y)/palmRegion.ry)**2<=1,inside:t>=-.03&&t<=1.04&&value>=-2.75&&value<=7.75};
 }
 function index(p){return Math.max(0,Math.min(5,Math.round(p.value)));}
 function setArmBend(semitones,releasing=false){audio.setBend(semitones,releasing?80:35);scene.dataset.bend=semitones.toFixed(3);$('#tremoloArm').style.transition=releasing?'transform 80ms ease-out':'none';$('#tremoloArm').style.transform=`rotate(${semitones*5}deg)`;scene.classList.toggle('arm-held',!releasing);}
@@ -89,9 +92,9 @@ window.addEventListener('blur',reset);document.addEventListener('visibilitychang
 // Effects use one persistent audio graph; UI buttons are siblings of the SVG,
 // so tapping a control never enters the instrument pointer handlers.
 const presets={red:{name:'赤',tone:'澄んだ響き',rgb:null},mint:{name:'ミントグリーン',tone:'ファンク',rgb:[.56,.87,.70]},black:{name:'黒',tone:'メタル',rgb:[.065,.07,.08]},darkbrown:{name:'焦茶',tone:'ナイロン',rgb:[.22,.11,.06]},redbrown:{name:'赤茶色',tone:'軽やかウクレレ',rgb:[.51,.20,.10]}};
-function selectPreset(id){const p=presets[id];if(!p)return;++playEpoch;for(const held of pointers.values())if(held.pending){clearTimeout(held.onsetTimer);held.pending=false;held.cancelled=true;}audio.setPreset(id);scene.dataset.preset=id;$$('button[data-preset]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.preset===id)));$('#harmonicHint').style.display=id==='redbrown'?'none':'';$('#presetName').textContent=`${p.name} · ${p.tone}`;$('#instrument').setAttribute('aria-label',`${p.name}のカニギター。一つの大きなハサミと四本の小さな足。弦にふれると音が出ます。`);for(const image of $$('.painted-sprite')){image.setAttribute('href',`sprites/${id}.png`);image.setAttributeNS('http://www.w3.org/1999/xlink','xlink:href',`sprites/${id}.png`);}}
+function selectPreset(id){const p=presets[id];if(!p)return;++playEpoch;for(const held of pointers.values())if(held.pending){clearTimeout(held.onsetTimer);held.pending=false;held.cancelled=true;}audio.setPreset(id);scene.dataset.preset=id;$$('button[data-preset]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.preset===id)));$('#harmonicHint').style.display=id==='redbrown'?'none':'';$('#presetName').textContent=`${p.name} · ${p.tone}`;$('#instrument').setAttribute('aria-label',`${p.name}のカニギター。一つの大きなハサミと四本の小さな足。弦にふれると音が出ます。`);for(const image of $$('.painted-sprite')){image.setAttribute('href',SPRITE_URLS[id]);image.setAttributeNS('http://www.w3.org/1999/xlink','xlink:href',SPRITE_URLS[id]);}}
 // Bounded five-resource browser image cache, warmed before the first color change.
-const colorImages=Object.keys(presets).map(id=>{const image=new Image();image.src=`sprites/${id}.png`;image.decode?.().catch(()=>{});return image;});
+const colorImages=Object.keys(presets).map(id=>{const image=new Image();image.src=SPRITE_URLS[id];image.decode?.().catch(()=>{});return image;});
 $$('button[data-preset]').forEach(b=>b.addEventListener('click',()=>selectPreset(b.dataset.preset)));
 selectPreset('red');
 
