@@ -26,7 +26,29 @@ export const SPRITE_PARTS = [
     rects: [[685, 990, 335, 51]], translate: [0, -187], pivot: [690, 808] },
 ];
 
-// The six string paths remain in the unchanged body/neck coordinate system.
+// Measured centerlines of the supplied sprite strings, bridge to nut.
+// Visual highlighting and touch coordinates share this one geometry.
+export const STRING_SEGMENTS = Object.freeze([
+  [642,682.89,1524.83,318.58],
+  [653.4,702.94,1532.17,336.93],
+  [664.8,723.14,1539.45,355.12],
+  [676.2,742.57,1546.48,372.71],
+  [687.6,762.31,1553.54,390.35],
+  [699,781.17,1560.35,407.38],
+].map(Object.freeze));
+export function stringPosition(x,y) {
+  const first=STRING_SEGMENTS[0],last=STRING_SEGMENTS[5];
+  const cx=(first[0]+last[0])/2,cy=(first[1]+last[1])/2;
+  const ux=(first[2]+last[2])/2-cx,uy=(first[3]+last[3])/2-cy;
+  const t=((x-cx)*ux+(y-cy)*uy)/(ux*ux+uy*uy);
+  const sides=STRING_SEGMENTS.map(([ax,ay,bx,by])=>(bx-ax)*(y-ay)-(by-ay)*(x-ax));
+  // Cross products measure transverse distance without longitudinal leakage.
+  const distances=sides.map((side,i)=>{const [ax,ay,bx,by]=STRING_SEGMENTS[i];return side/Math.hypot(bx-ax,by-ay);});
+  let interval=distances[0]<0?0:4;
+  for(let i=0;i<5;i++)if(distances[i]>=0&&distances[i+1]<=0){interval=i;break;}
+  const value=interval+distances[interval]/(distances[interval]-distances[interval+1]);
+  return {t,value,sides,ux,uy};
+}
 // Hit areas stay comfortably larger than the visible grip and claw center.
 export const SPRITE_HIT_REGIONS = Object.freeze({
   palm: Object.freeze({ x: 422, y: 452, rx: 120, ry: 105 }),
@@ -58,7 +80,7 @@ export function mountSpriteParts(svg) {
     const placement = create('g', { class: 'sprite-placement', transform: `translate(${part.translate.join(' ')})` });
     const image = create('image', {
       class: 'painted-sprite', href: SPRITE_URLS.red,
-      width: SPRITE_SHEET.width, height: SPRITE_SHEET.height,
+      width: SPRITE_SHEET.width, height: SPRITE_SHEET.height, preserveAspectRatio: 'xMidYMid meet',
       'clip-path': `url(#${part.clipId})`,
     });
     image.setAttributeNS(xlink, 'xlink:href', SPRITE_URLS.red);

@@ -1,5 +1,5 @@
 import {GuitarAudio} from './audio.js?v=18';
-import {mountSpriteParts, SPRITE_URLS, SPRITE_HIT_REGIONS} from './sprite-parts.js?v=19';
+import {mountSpriteParts, SPRITE_URLS, SPRITE_HIT_REGIONS, STRING_SEGMENTS, stringPosition} from './sprite-parts.js?v=20';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const audio=new GuitarAudio();
 const bases=[82.406889,110,146.832384,195.997718,246.941651,329.627557];
@@ -14,7 +14,7 @@ const midiName=f=>['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B
 for(let i=0;i<6;i++){
  const b=document.createElement('button');b.className='string-button';b.dataset.string=i;b.style.setProperty('--thickness',`${3-i*.36}px`);b.innerHTML=`<span class="note">${names[i]}</span><span class="wire"></span><span class="number">${6-i}</span>`;b.setAttribute('aria-label',`${6-i}弦 ${names[i]}を弾く`);board.append(b);
  b.addEventListener('click',e=>{if(e.detail===0){play(i);}});
- const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.id=`actual-${i}`;path.setAttribute('d',`M ${635+i*11.4} ${684+i*19.6} L ${1522+i*6.8} ${314+i*19.4}`);path.classList.add('actual-string');$('#actualStrings').append(path);
+ const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.id=`actual-${i}`;path.setAttribute('d',`M ${STRING_SEGMENTS[i][0]} ${STRING_SEGMENTS[i][1]} L ${STRING_SEGMENTS[i][2]} ${STRING_SEGMENTS[i][3]}`);path.classList.add('actual-string');$('#actualStrings').append(path);
 }
 async function play(i,velocity=.72,harmonic=false){harmonic=harmonic&&scene.dataset.preset!=='redbrown';if(armPointer!==null||palmPointers.size||i<0||i>5||chords[chord][i]===null)return;const epoch=playEpoch;const frequency=bases[i]*2**(chords[chord][i]/12);const button=board.children[i],wire=$(`#actual-${i}`);clearTimeout(flashes.get(i));button.classList.remove('playing');button.classList.add('playing');wire.classList.add('playing');flashes.set(i,setTimeout(()=>{button.classList.remove('playing');wire.classList.remove('playing');},500));$('#lastNote').textContent=harmonic?'✧ '+midiName(frequency):midiName(frequency);$('#mood').textContent=harmonic?'✧ キーン':'♪ ぽろん';scene.dataset.plucks=String(++plucks);scene.dataset.lastFrequency=frequency.toFixed(3);scene.dataset.lastTechnique=harmonic?'harmonic':'normal';try{if(audio.context?.state!=='running')await audio.unlock();if(epoch!==playEpoch||palmPointers.size||armPointer!==null)return;if(harmonic)audio.pluckHarmonic(frequency,velocity,i);else audio.pluck(frequency,velocity,i);wakeSound();$('#soundState').textContent=muted?'ミュート中':harmonic?'ピッキングハーモニクス':'音あそび中';$('#soundDot').classList.toggle('on',!muted);}catch(error){$('#soundState').textContent='音を出せませんでした。もう一度タップ';console.error('Audio initialization failed',error);}}
 function boardPosition(e){const r=board.getBoundingClientRect(),value=(e.clientX-r.left-5)/(r.width-10)*6-.5;return {value,sides:Array.from({length:6},(_,i)=>value-i),normalX:1,normalY:0,tangentX:0,tangentY:1,along:e.clientY>=r.top&&e.clientY<=r.bottom,inside:e.clientY>=r.top&&e.clientY<=r.bottom&&e.clientX>=r.left&&e.clientX<=r.right};}
@@ -22,10 +22,8 @@ function instrumentPosition(e){
  const matrix=$('#actualStrings').getScreenCTM();if(!matrix)return{value:0,inside:false};
  const point=instrument.createSVGPoint();point.x=e.clientX;point.y=e.clientY;
  const {x,y}=point.matrixTransform(matrix.inverse()),armMatrix=$('#tremoloArm').getScreenCTM(),armPoint=armMatrix?point.matrixTransform(armMatrix.inverse()):{x,y};
- const ux=887,uy=-370,dx=x-635,dy=y-684,t=(dx*ux+dy*uy)/(ux*ux+uy*uy),value=(dx*370+dy*887)/(11.4*370+19.6*887);
+ const {ux,uy,t,value,sides}=stringPosition(x,y);
  const screenX=matrix.a*ux+matrix.c*uy,screenY=matrix.b*ux+matrix.d*uy,length=Math.hypot(screenX,screenY),orientation=Math.sign(matrix.a*matrix.d-matrix.b*matrix.c)||1;
- // Test the actual rendered line equations, including their slightly tapered spacing.
- const sides=Array.from({length:6},(_,i)=>(887-4.6*i)*(y-684-19.6*i)-(-370-.2*i)*(x-635-11.4*i));
  return {value,t,x,y,sides,normalX:-screenY/length*orientation,normalY:screenX/length*orientation,tangentX:screenX/length,tangentY:screenY/length,arm:((armPoint.x-armRegion.x)/armRegion.rx)**2+((armPoint.y-armRegion.y)/armRegion.ry)**2<=1,along:t>=-.03&&t<=1.04,harmonic:scene.dataset.preset!=='redbrown'&&t>=.76&&t<=.98,palm:((x-palmRegion.x)/palmRegion.rx)**2+((y-palmRegion.y)/palmRegion.ry)**2<=1,inside:t>=-.03&&t<=1.04&&value>=-2.75&&value<=7.75};
 }
 function index(p){return Math.max(0,Math.min(5,Math.round(p.value)));}
