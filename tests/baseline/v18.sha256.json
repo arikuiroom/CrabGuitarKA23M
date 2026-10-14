@@ -1,0 +1,90 @@
+{
+  "version": "v18",
+  "description": "Immutable original production files at repository organization. This historical manifest is not updated for later features.",
+  "files": [
+    {
+      "original": "app-icon.svg",
+      "source": "public/app-icon.svg",
+      "dist": "app-icon.svg",
+      "bytes": 736600,
+      "sha256": "c6612c96834f45089354836e8bf1aa47639e0b3f58c5cae1d37c0a262ad5f80f"
+    },
+    {
+      "original": "app.js",
+      "source": "src/app.js",
+      "dist": "app.js",
+      "bytes": 16289,
+      "sha256": "c8819e3b121d2a496424347b797feb0f6747b7b755038d11c04ed0557d86fd8d"
+    },
+    {
+      "original": "audio.js",
+      "source": "src/audio.js",
+      "dist": "audio.js",
+      "bytes": 45420,
+      "sha256": "fde827e8f4fad985346ced0378d46749b582ed462fa14445adf95c3044ecd393"
+    },
+    {
+      "original": "index.html",
+      "source": "public/index.html",
+      "dist": "index.html",
+      "bytes": 8391,
+      "sha256": "b9a6088429e698890c6b66814a7de1c6a1b26797d80fc4ae7204954132bae334"
+    },
+    {
+      "original": "kani.png",
+      "source": "public/kani.png",
+      "dist": "kani.png",
+      "bytes": 552298,
+      "sha256": "a21a5adcea1d7cfea1a9e00e47ab7668168d6dca7337bd7e9dcf0ca5ca22ac86"
+    },
+    {
+      "original": "manifest.webmanifest",
+      "source": "public/manifest.webmanifest",
+      "dist": "manifest.webmanifest",
+      "bytes": 451,
+      "sha256": "17a6be6e0bccefea8328618f4cabff98b7edddb046a9cfb9796a53c84980de78"
+    },
+    {
+      "original": "sprites/black.png",
+      "source": "public/sprites/black.png",
+      "dist": "sprites/black.png",
+      "bytes": 620750,
+      "sha256": "a3861079b4dadb17b86d67494da4cb3ae124320237c5ee7907d98d45822f8cad"
+    },
+    {
+      "original": "sprites/darkbrown.png",
+      "source": "public/sprites/darkbrown.png",
+      "dist": "sprites/darkbrown.png",
+      "bytes": 629412,
+      "sha256": "980e03f0e800ef9208e75f95e374af8fe6e67cf57b26fe4dab5aaf901bd1ed68"
+    },
+    {
+      "original": "sprites/mint.png",
+      "source": "public/sprites/mint.png",
+      "dist": "sprites/mint.png",
+      "bytes": 587132,
+      "sha256": "8f578ae7e2c3dd04b56fdd451a70959aa1b679b9231dc4ba1580cfdad1e172bb"
+    },
+    {
+      "original": "sprites/red.png",
+      "source": "public/sprites/red.png",
+      "dist": "sprites/red.png",
+      "bytes": 677684,
+      "sha256": "5c49bfedb200f575a71927df9825d080e4c73ddde50981db8db1e86474debdc6"
+    },
+    {
+      "original": "sprites/redbrown.png",
+      "source": "public/sprites/redbrown.png",
+      "dist": "sprites/redbrown.png",
+      "bytes": 637157,
+      "sha256": "9102555e465da09018caf2896ba36b3e496a3a413d7b2c261a8d9ea85e3e1398"
+    },
+    {
+      "original": "style.css",
+      "source": "src/style.css",
+      "dist": "style.css",
+      "bytes": 21250,
+      "sha256": "5036130209990bdc37b9510205a9ca344710de39ff88c7ce0ac124a1f53badc4"
+    }
+  ]
+}

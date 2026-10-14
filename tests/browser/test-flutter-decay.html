@@ -1,0 +1,98 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Audio-envelope flutter regression</title>
+<style>body{margin:12px;font:14px system-ui}iframe{display:block;width:390px;height:844px;border:0}button{min-height:44px}pre{white-space:pre-wrap}</style>
+<button id="run">Run flutter decay tests</button>
+<pre id="result">Ready. Keep this tab foregrounded. Runs real Web Audio from this button gesture; synthetic touch capture is stubbed only in the fixture. Physical phone audio and rendering remain a separate device test.</pre>
+<iframe id="app" src="../../dist/index.html"></iframe>
+<script type="module">
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+run.onclick=async()=>{
+ run.disabled=true;
+ const checks=[],presets=[],special=[];
+ const report=extra=>result.textContent=JSON.stringify({running:true,checks,presets,special,...extra},null,2);
+ try{
+  const w=app.contentWindow,d=w.document,scene=d.querySelector('.scene'),svg=d.querySelector('#instrument');
+  svg.setPointerCapture=()=>{};
+  const script=d.createElement('script');script.type='module';
+  script.textContent=`import{GuitarAudio}from'./audio.js?v=18';
+   if(!window.flutterProbe){
+    window.flutterProbe={reads:0};
+    const unlock=GuitarAudio.prototype.unlock;
+    GuitarAudio.prototype.unlock=function(...args){window.flutterProbe.audio=this;return unlock.apply(this,args)};
+    const read=GuitarAudio.prototype.readOutputLevel;window.flutterProbe.read=read;
+    GuitarAudio.prototype.readOutputLevel=function(...args){window.flutterProbe.reads++;return read.apply(this,args)};
+   }
+   window.flutterProbe.ready=true;`;
+  d.body.append(script);await sleep(80);
+  const assert=(ok,message)=>{if(!ok)throw Error(message);checks.push(message);report()},
+   active=()=>scene.dataset.audible==='true',
+   amount=()=>Number(scene.style.getPropertyValue('--flutter-amount'))||0,
+   until=async(fn,ms)=>{const start=performance.now();while(!fn()&&performance.now()-start<ms)await sleep(25);return fn()},
+   xy=(x,y)=>{const point=svg.createSVGPoint();point.x=x;point.y=y;return point.matrixTransform(d.querySelector('#actualStrings').getScreenCTM())},
+   pos=(v=2,t=.4)=>xy(635+887*t+11.4*v,684-370*t+19.6*v);
+  let pointer=1;
+  const event=(type,p,id=pointer)=>svg.dispatchEvent(new w.PointerEvent(type,{pointerId:id,pointerType:'touch',clientX:p.x,clientY:p.y,bubbles:true,button:0})),
+   pluck=(v=2,t=.4)=>{pointer++;const p=pos(v,t);event('pointerdown',p);event('pointerup',p)},
+   stop=async()=>{d.querySelector('#stop').click();assert(await until(()=>!active()&&amount()===0,800),'Stop returns to exact stillness');await sleep(180)},
+   sample=at=>({ms:Math.round(performance.now()-at),rms:w.flutterProbe.read.call(w.flutterProbe.audio),amount:amount()}),
+   average=items=>({rms:items.reduce((sum,item)=>sum+item.rms,0)/items.length,amount:items.reduce((sum,item)=>sum+item.amount,0)/items.length});
+  assert(w.flutterProbe.ready,'Probe installed before the first note');
+  assert(!active()&&amount()===0,'Initial silence has zero movement');
+  let initialReads=w.flutterProbe.reads;await sleep(180);assert(w.flutterProbe.reads===initialReads,'Initial idle meter is parked');
+  const limbs=[...d.querySelectorAll('.limb')];assert(limbs.length===5,'Original one claw and four legs are preserved');
+  for(const preset of ['red','mint','black','darkbrown','redbrown']){
+   d.querySelector('button[data-preset="'+preset+'"]').click();
+   const start=performance.now();pluck();assert(await until(active,800),preset+': audible output starts flutter');
+   const first=limbs.map(el=>w.getComputedStyle(el).transform);await sleep(105);
+   assert(limbs.every((el,index)=>w.getComputedStyle(el).transform!==first[index]),preset+': all five appendages move');
+   const samples=[sample(start)];
+   while(active()&&performance.now()-start<16000){await sleep(40);samples.push(sample(start))}
+   assert(!active()&&amount()===0,preset+': natural output decay reaches exact stillness');
+   const duration=samples.at(-1).ms,
+    early=samples.filter(s=>s.ms<Math.min(400,duration*.2)),
+    mid=samples.filter(s=>s.ms>=duration*.3&&s.ms<duration*.5),
+    late=samples.filter(s=>s.ms>=duration*.7&&s.ms<duration*.9),
+    earlyPeak=Math.max(...early.map(s=>s.amount)),
+    record={preset,durationMs:duration,early:{peakAmount:earlyPeak,...average(early)},mid:average(mid),late:average(late),final:samples.at(-1)};
+   presets.push(record);report();
+   assert(earlyPeak>=.7,preset+': normalized attack gives a large flutter');
+   assert(record.mid.amount<earlyPeak-.06,preset+': middle amplitude is smaller than the attack');
+   assert(record.late.amount<record.mid.amount-.025,preset+': late amplitude is smaller again');
+   assert(record.late.rms<record.mid.rms,preset+': smaller movement follows lower measured output');
+   assert(limbs.every(el=>w.getComputedStyle(el).transform==='none'),preset+': every appendage is stationary at silence');
+   assert(await until(()=>w.flutterProbe.audio.liveVoices.size===0,4000),preset+': audio voices drain');await sleep(600);
+   const reads=w.flutterProbe.reads;await sleep(250);assert(w.flutterProbe.reads===reads,preset+': silent meter parks');
+  }
+  d.querySelector('button[data-preset="red"]').click();pluck();assert(await until(active,800),'Repeat case starts');
+  assert(await until(()=>active()&&amount()<.5,9000),'First note visibly decays before repeated pluck');
+  const before=amount(),dances=scene.dataset.dances,animations=limbs.map(el=>el.getAnimations()[0]);
+  pluck();assert(await until(()=>amount()>.75,500),'Repeated pluck restores a large flutter');
+  assert(scene.dataset.dances===dances&&limbs.every((el,index)=>el.getAnimations()[0]===animations[index]),'Repeat changes amplitude without restarting the five animation loops');
+  special.push({case:'repeat',before,after:amount()});
+  const muteStart=performance.now(),beforeMute=amount();d.querySelector('#mute').click();await sleep(55);const muteMiddle=amount();
+  assert(await until(()=>!active()&&amount()===0,650),'Permanent mute smoothly reaches zero');
+  assert(muteMiddle<beforeMute,'Mute reduces amplitude before becoming still');
+  special.push({case:'mute',before:beforeMute,middle:muteMiddle,after:amount(),durationMs:Math.round(performance.now()-muteStart)});
+  const mutedReads=w.flutterProbe.reads;await sleep(180);assert(w.flutterProbe.reads===mutedReads,'Muted meter is parked');
+  pluck();await sleep(180);assert(!active()&&amount()===0,'Playing while muted cannot make silent limbs flutter');
+  d.querySelector('#mute').click();pluck();assert(await until(active,800),'Fresh note after unmuting moves');await sleep(130);
+  const volume=d.querySelector('#volume');volume.value='0';volume.dispatchEvent(new w.Event('input',{bubbles:true}));
+  assert(await until(()=>!active()&&amount()===0,650),'Zero volume becomes completely still');
+  const zeroReads=w.flutterProbe.reads;await sleep(180);assert(w.flutterProbe.reads===zeroReads,'Zero-volume meter is parked');
+  volume.value='45';volume.dispatchEvent(new w.Event('input',{bubbles:true}));await stop();
+  pluck();assert(await until(active,800),'Palm case starts');await sleep(150);pointer++;event('pointerdown',xy(390,420));
+  assert(await until(()=>!active()&&amount()===0,800),'Body mute follows the actual fade to stillness');event('pointerup',xy(390,420));
+  await sleep(250);assert(!active()&&amount()===0,'Palm release never revives motion');
+  d.querySelector('button[data-preset="darkbrown"]').click();pluck(2,.88);
+  assert(await until(active,500),'Quiet short nylon harmonic still produces flutter');
+  assert(await until(()=>!active()&&amount()===0,900),'Short nylon harmonic settles promptly');
+  d.querySelector('button[data-preset="red"]').click();pluck();assert(await until(active,800),'Reset case starts');await sleep(120);
+  w.dispatchEvent(new w.Event('blur'));assert(!active()&&amount()===0,'Blur resets the envelope and limbs immediately');
+  const blurReads=w.flutterProbe.reads;await sleep(200);assert(w.flutterProbe.reads===blurReads,'Blur cancels the meter');
+  result.textContent=JSON.stringify({passed:true,checks,presets,special},null,2);
+ }catch(error){result.textContent=JSON.stringify({passed:false,checks,presets,special,error:String(error.stack||error)},null,2)}
+ run.disabled=false;
+};
+</script>

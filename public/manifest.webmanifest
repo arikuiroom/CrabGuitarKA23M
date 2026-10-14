@@ -1,0 +1,20 @@
+{
+  "id": "./",
+  "name": "カニギター",
+  "short_name": "カニギター",
+  "description": "カニギターの弦にふれて、音と小さな動きを楽しむ。",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f3eb",
+  "theme_color": "#f5f3eb",
+  "icons": [
+    {
+      "src": "app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

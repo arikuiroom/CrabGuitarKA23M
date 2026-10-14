@@ -1,0 +1,19 @@
+{
+  "name": "crab-guitar-ka23m",
+  "version": "0.18.0",
+  "private": true,
+  "type": "module",
+  "description": "A six-string Kani Guitar Web Audio instrument.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/serve.mjs --watch",
+    "preview": "node scripts/serve.mjs",
+    "test": "npm run test:build && npm run test:audio",
+    "test:build": "node --test tests/build/*.test.mjs",
+    "test:audio": "node tests/audio/test-audio.mjs",
+    "verify:baseline": "node scripts/verify-baseline.mjs"
+  }
+}

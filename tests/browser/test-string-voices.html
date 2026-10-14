@@ -1,0 +1,96 @@
+<!doctype html><meta charset="utf-8"><title>String replacement native audio tests</title>
+<button id="run">Run native audio checks</button><pre id="result">Ready</pre>
+<script type="module">
+import { GuitarAudio } from './../../dist/audio.js?v=18';
+const result = document.querySelector('#result');
+const sr = 44100, presets = ['red', 'mint', 'black', 'darkbrown', 'redbrown'];
+const assert = (condition, label) => { if (!condition) throw new Error(label); };
+const rms = (data, start, end) => {
+  let sum = 0; const a = Math.floor(start * sr), b = Math.min(data.length, Math.floor(end * sr));
+  for (let i = a; i < b; i++) sum += data[i] ** 2;
+  return Math.sqrt(sum / (b - a));
+};
+function compare(reference, candidate) {
+  let maximumDifference = 0, squaredDifference = 0, firstDifferentSample = -1;
+  for (let i = 0; i < reference.length; i++) {
+    const difference = reference[i] - candidate[i];
+    maximumDifference = Math.max(maximumDifference, Math.abs(difference));
+    squaredDifference += difference ** 2;
+    if (firstDifferentSample < 0 && difference !== 0) firstDifferentSample = i;
+  }
+  return { maximumDifference, differenceRms: Math.sqrt(squaredDifference / reference.length),
+    referenceRms: rms(reference, 0, 2), candidateRms: rms(candidate, 0, 2), firstDifferentSample };
+}
+async function open(preset, channels = 2) {
+  const context = new OfflineAudioContext(channels, sr * 2, sr);
+  context.resume = () => Promise.resolve();
+  globalThis.AudioContext = function () { return context; };
+  const audio = new GuitarAudio(); audio.setPreset(preset); audio.setVolume(.45); await audio.unlock();
+  return { context, audio };
+}
+async function chord(preset, indexed) {
+  const { context, audio } = await open(preset);
+  [82.406889, 110, 146.832384, 195.997718, 246.941651, 329.627557]
+    .forEach((frequency, index) => audio.pluck(frequency, .7, indexed ? index : undefined));
+  return (await context.startRendering()).getChannelData(0);
+}
+async function replacement(preset, replace) {
+  const { context, audio } = await open(preset, 3);
+  audio.master.disconnect();
+  const stems = context.createChannelMerger(3); stems.connect(context.destination);
+  audio.pluck(110, .7, 0); const old = audio.stringVoices[0]; old.gain.connect(stems, 0, 0);
+  audio.pluck(329.627557, .7, 1); const other = audio.stringVoices[1]; other.gain.connect(stems, 0, 1);
+  let at;
+  const suspended = context.suspend(.4).then(async () => {
+    at = context.currentTime;
+    if (replace) {
+      audio.pluckHarmonic(146.832384, .8, 0);
+      const fresh = audio.stringVoices[0]; fresh.gain.connect(stems, 0, 2);
+      assert(fresh.start === at, 'new note starts at the current audio time');
+      assert(old.stopAt === at + .02, 'previous source has an exact 20 ms release');
+      assert(other.stopAt === undefined, 'other source has not been stopped');
+    }
+    await OfflineAudioContext.prototype.resume.call(context);
+  });
+  const buffer = await context.startRendering(); await suspended;
+  return { at, old: buffer.getChannelData(0), other: buffer.getChannelData(1), fresh: buffer.getChannelData(2) };
+}
+async function run() {
+  result.textContent = 'Rendering…';
+  const original = globalThis.AudioContext;
+  try {
+    const rows = [];
+    for (const preset of presets) {
+      const legacy = await chord(preset, false), repeatedLegacy = await chord(preset, false);
+      const indexed = await chord(preset, true);
+      const repeatControl = compare(legacy, repeatedLegacy), indexedComparison = compare(legacy, indexed);
+      // Native convolution/compression can differ slightly across identical
+      // offline renders. Keep a repeated legacy control and tight absolute
+      // bounds (max 1e-4; RMS 1e-5), rather than claiming bit-identical output.
+      // 1e-5 RMS is -100 dBFS, far below the approximately .05 RMS instrument.
+      for (const [label, comparison] of [['legacy repeat', repeatControl], ['indexed', indexedComparison]]) {
+        assert(comparison.maximumDifference < 1e-4 && comparison.differenceRms < 1e-5,
+          `${preset}: ${label} tone comparison ${JSON.stringify({ repeatControl, indexedComparison })}`);
+      }
+      const baseline = await replacement(preset, false), changed = await replacement(preset, true);
+      const otherComparison = compare(baseline.other, changed.other);
+      assert(otherComparison.maximumDifference < 1e-6 && otherComparison.differenceRms < 1e-7,
+        `${preset}: other-string stem changed ${JSON.stringify(otherComparison)}`);
+      const oldAfterFade = rms(changed.old, changed.at + .021, changed.at + .2);
+      const oldBeforeFade = rms(changed.old, changed.at - .03, changed.at);
+      assert(oldBeforeFade > .00001 && oldAfterFade === 0, `${preset}: old vibration reaches silence`);
+      const attack = rms(changed.fresh, changed.at, changed.at + .004);
+      assert(attack > .00001, `${preset}: new attack is audible within 4 ms`);
+      const from = Math.floor((changed.at + .0195) * sr), to = Math.ceil((changed.at + .0205) * sr);
+      let endStep = 0; for (let i = from + 1; i < to; i++) endStep = Math.max(endStep, Math.abs(changed.old[i] - changed.old[i - 1]));
+      assert(endStep < .0001, `${preset}: fade endpoint has no discontinuity`);
+      rows.push({ preset, repeatControl, indexedComparison, otherComparison, oldBeforeFade, oldAfterFade, first4msRms: attack, maximumFadeEndStep: endStep });
+    }
+    result.textContent = JSON.stringify({ passed: true, rows, scope: 'Native Chromium OfflineAudioContext; no speakers, hardware-latency or mobile CPU measurement.' }, null, 2);
+    document.title = 'PASS string replacement';
+  } catch (error) { result.textContent = JSON.stringify({ passed: false, error: String(error.stack || error) }); document.title = 'FAIL string replacement'; }
+  finally { globalThis.AudioContext = original; }
+}
+document.querySelector('#run').addEventListener('click', run);
+if (new URLSearchParams(location.search).has('auto')) run();
+</script>

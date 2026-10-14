@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CrabGuitarKA23M browser checks</title>
+<style>body{max-width:850px;margin:32px auto;padding:0 20px;font:16px/1.5 system-ui}li{margin:18px 0}p{margin:4px 0}a{color:#a32535}</style></head><body>
+<h1>Browser checks</h1>
+<p>Run <code>npm run dev</code>, open a fixture, and click its Run button. Keep the tab in the foreground. Some fixtures make sound; lower your volume first.</p>
+<p>These are manual browser fixtures, not part of <code>npm test</code>. Synthetic pointer tests do not replace physical multi-touch or iPhone/Safari testing. OfflineAudioContext tests verify native rendering, not device output latency.</p>
+<p><a href="../../">Open the instrument</a></p><ul><li><a href="test-string-mono-ui.html">test-string-mono-ui.html</a><p>Current normal swipes and one active voice per physical string</p></li>
+<li><a href="test-input.html">test-input.html</a><p>Chord holds and expanded direct-string hit areas</p></li>
+<li><a href="test-arm.html">test-arm.html</a><p>Tremolo-arm exclusivity, return, cancellation and claw mute</p></li>
+<li><a href="test-techniques.html">test-techniques.html</a><p>Harmonic tap/swipe classification and hold-to-mute</p></li>
+<li><a href="test-flutter-decay.html">test-flutter-decay.html</a><p>Real-audio, output-driven decaying limb animation</p></li>
+<li><a href="test-direct-colors.html">test-direct-colors.html</a><p>Five cached color sprites and visible SVG image updates</p></li>
+<li><a href="test-viewport.html">test-viewport.html</a><p>Portrait and landscape sizing without document scrolling</p></li>
+<li><a href="test-string-voices.html">test-string-voices.html</a><p>Native offline audio: source replacement and independent strings</p></li>
+<li><a href="test-harmonic-refinement.html">test-harmonic-refinement.html</a><p>Native offline audio: electric harmonic decay and headroom</p></li>
+<li><a href="test-endurance.html">test-endurance.html</a><p>180-second foreground playing and idle-resource diagnostic</p></li></ul>
+<p>Historical cutting and exterior-start fixtures are excluded because the current UI uses normal swipes at every speed. Audio-only compatibility methods remain covered by the Node suite.</p>
+</body></html>

@@ -1,0 +1,72 @@
+<!doctype html><meta charset="utf-8"><title>Natural harmonic audio QA</title>
+<button id="run">Run native harmonic tests</button><pre id="result">Ready</pre>
+<script type="module">async function nativeOfflineAudio() {
+  const { GuitarAudio } = await import('./../../dist/audio.js');
+  const frequencies = [82.406889, 110, 146.832384, 195.997718, 246.941651, 329.627557];
+  const original = globalThis.AudioContext, results = [];
+  const peak = data => { let value = 0; for (const sample of data) value = Math.max(value, Math.abs(sample)); return value; };
+  const rms = (data, sr, from, to) => {
+    const start = Math.floor(from * sr), end = Math.min(data.length, Math.floor(to * sr));
+    let sum = 0; for (let i = start; i < end; i++) sum += data[i] ** 2;
+    return Math.sqrt(sum / (end - start));
+  };
+  const amplitude = (data, hz, sr) => {
+    const start = Math.floor(sr * 0.06), end = Math.floor(sr * 0.3);
+    let re = 0, im = 0, weights = 0;
+    for (let i = start; i < end; i++) {
+      const weight = 0.5 - 0.5 * Math.cos(2 * Math.PI * (i - start) / (end - start - 1)), phase = i * hz * 2 * Math.PI / sr;
+      re += data[i] * weight * Math.cos(phase); im += data[i] * weight * Math.sin(phase); weights += weight;
+    }
+    return 2 * Math.hypot(re, im) / weights;
+  };
+  try {
+    for (const sr of [44100, 48000]) for (const preset of ['red', 'mint', 'black']) {
+      for (const frequency of frequencies) {
+        const context = new OfflineAudioContext(2, Math.ceil(sr * 4.35), sr);
+        context.resume = () => Promise.resolve();
+        globalThis.AudioContext = function () { return context; };
+        const audio = new GuitarAudio(); audio.setPreset(preset); audio.setVolume(0.45); await audio.unlock();
+        audio.pluckHarmonic(frequency, 0.8);
+        const buffer = await context.startRendering(), data = buffer.getChannelData(0);
+        const modes = [1, 2, 3, 4, 5].map(partial => amplitude(data, frequency * partial, sr));
+        const body = rms(data, sr, 0.04, 0.2), tail = rms(data, sr, 0.9, 1.1);
+        const row = { sr, preset, frequency, peak: peak(data), attackRms: rms(data, sr, 0.008, 0.035),
+          bodyRms: body, tailRms: tail, tailRatio: tail / body,
+          lateRms: rms(data, sr, 2.65, 2.85), finalRms: rms(data, sr, 4.15, 4.3),
+          fourthDominance: modes[3] / Math.max(...modes.slice(0, 3), modes[4]), finite: data.every(Number.isFinite) };
+        // Metal saturation/compression intentionally sustains near-constant
+        // early loudness. Judge its later decay and complete natural ending;
+        // source-mode decay itself is checked by the pure-PCM suite above.
+        const decays = preset === 'black' ? row.lateRms < row.tailRms * 0.95
+          : row.tailRatio < 0.9 && row.lateRms < row.bodyRms * 0.35;
+        row.passed = row.finite && row.peak < 0.9 && row.attackRms > 0.002 && row.bodyRms > 0.004
+          && row.tailRatio > 0.05 && decays && row.finalRms < 1e-7 && row.fourthDominance > 4;
+        results.push(row);
+      }
+      const context = new OfflineAudioContext(2, Math.ceil(sr * 0.8), sr);
+      context.resume = () => Promise.resolve();
+      globalThis.AudioContext = function () { return context; };
+      const audio = new GuitarAudio(); audio.setPreset(preset); audio.setVolume(1); await audio.unlock();
+      for (let round = 0; round < 2; round++) for (const frequency of frequencies) audio.pluckHarmonic(frequency, 1);
+      const stopped = context.suspend(0.3).then(async () => {
+        audio.stopAll(); await OfflineAudioContext.prototype.resume.call(context);
+      });
+      const buffer = await context.startRendering(); await stopped;
+      const left = buffer.getChannelData(0), right = buffer.getChannelData(1);
+      const row = { sr, preset, mode: '12-voice-overload-and-stop', peak: Math.max(peak(left), peak(right)),
+        stoppedRms: Math.max(rms(left, sr, 0.42, 0.78), rms(right, sr, 0.42, 0.78)),
+        finite: left.every(Number.isFinite) && right.every(Number.isFinite) };
+      row.passed = row.finite && row.peak < 0.9 && row.stoppedRms < 1e-7;
+      results.push(row);
+    }
+    return { passed: results.every(row => row.passed), cases: results.length, results };
+  } finally { globalThis.AudioContext = original; }
+}
+window.nativeOfflineAudio = nativeOfflineAudio;
+window.runAudioTests = async () => {
+  document.querySelector('#result').textContent = 'Rendering…';
+  try { const result = await nativeOfflineAudio(); document.querySelector('#result').textContent = JSON.stringify(result, null, 2); return result; }
+  catch (error) { document.querySelector('#result').textContent = String(error.stack || error); throw error; }
+};
+document.querySelector('#run').onclick = window.runAudioTests;
+</script>
