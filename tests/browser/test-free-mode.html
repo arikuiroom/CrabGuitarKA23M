@@ -51,7 +51,7 @@ run.onclick=async()=>{
   const signatures=[];
   for(const preset of ['red','mint','black','darkbrown','redbrown']){
     $('[data-chord="G"]').click();$('[data-preset="'+preset+'"]').click();const mark=w.freeProbe.notes.length;
-    await start();assert(await until(()=>w.freeProbe.notes.length-mark>=5,6000),preset+' produces phrase');
+    await start();assert(await until(()=>w.freeProbe.notes.length-mark>=(preset==='mint'?6:5),6000),preset+' produces phrase');
     const phrase=w.freeProbe.notes.slice(mark);assert(phrase.every(n=>n.preset===preset),preset+' stays selected');
     signatures.push(phrase.slice(0,5).map(n=>n.i).join(','));
     if(preset==='mint')assert(phrase.some(n=>n.gate===.12)&&phrase.some(n=>n.gate===undefined),'Funk mixes clipped hits with natural tails');

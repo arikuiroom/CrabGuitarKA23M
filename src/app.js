@@ -1,4 +1,4 @@
-import {createFreeMode, freeStrings} from './free-mode.js?v=23';
+import {createFreeMode, freeStrings} from './free-mode.js?v=24';
 import {GuitarAudio} from './audio.js?v=23';
 import {mountSpriteParts, createSpritePainter, SPRITE_HIT_REGIONS, STRING_SEGMENTS, stringPosition} from './sprite-parts.js?v=23';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];

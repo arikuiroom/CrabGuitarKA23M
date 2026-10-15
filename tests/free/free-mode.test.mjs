@@ -20,9 +20,9 @@ test('silent initial state, one shared absolute clock; 1000 ticks have no drift'
   assert(f.hits.length>50);f.mode.stop();assert.equal(f.timers.size,0);assert.deepEqual(f.changes,[true,false]);
 });
 test('rhythm continues during guitar phrase rests on the same grid',async()=>{
-  const f=fixture();await f.mode.start();for(let i=0;i<160;i++)f.next();
+  const f=fixture();f.setPreset('mint');await f.mode.start();for(let i=0;i<160;i++)f.next();
   assert(f.hits.some(h=>!f.notes.some(n=>n.time===h.time)));
-  for(const event of [...f.notes,...f.hits])assert.equal((event.time-160)%130,0);
+  for(const event of [...f.notes,...f.hits])assert.equal((event.time-160)%110,0);
   f.mode.stop();
 });
 test('lag skips elapsed events without bursts and returns to original grid',async()=>{
@@ -65,7 +65,7 @@ test('distinct scores, quiet style patterns, per-note articulation and natural e
     const f=fixture();f.setPreset(preset);await f.mode.start();for(let i=0;i<24;i++)f.nextNote();
     pitches.add(f.notes.map(n=>n.i).join(','));rhythms.add(f.notes.map(n=>n.time).join(','));
     assert(f.notes.every(n=>n.v>0&&n.v<.65));assert(f.hits.every(h=>h.level>0&&h.level<=.8));
-    if(['mint','black'].includes(preset)){assert(f.notes.some(n=>n.gate===undefined));assert(f.notes.some(n=>n.gate===(preset==='mint'?.12:.17)));assert.equal(f.notes[7].gate,undefined)}
+    if(['mint','black'].includes(preset)){assert(f.notes.some(n=>n.gate===undefined));assert(f.notes.some(n=>n.gate===(preset==='mint'?.12:.17)))}
     else assert(f.notes.every(n=>n.gate===undefined));
     f.mode.stop();
   }

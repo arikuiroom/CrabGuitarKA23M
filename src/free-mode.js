@@ -11,29 +11,42 @@ export function freeStrings(chord, frets, preset = 'red') {
   return [root, (root + 7) % 12].map(pc => strings.find(i => (openMidi[i] + frets[i]) % 12 === pc))
     .filter(i => i !== undefined);
 }
-// Original short phrases. Entries are [position in available pitches, beats,
-// accent]. Exact subdivisions keep syncopation clear; only touch varies.
+// Original four-bar hooks: A, A, A′, B. Entries are [position in the
+// available chord pitches, sixteenth-note ticks, accent]; null means a rest.
+// Small neighboring steps keep the tune singable. Black uses the two ends
+// of its root/fifth-only palette. Every fourth cycle has one small answer
+// variation; the hook and its bar boundaries stay recognizable throughout.
 const scores = {
-  red: { beat: 520, rest: 1560, velocity: .47, phrases: [
-    [[1,1,0],[1,1,0],[2,1,.02],[3,2,.03],[2,1,0],[1,2,-.02]],
-    [[2,1,0],[2,1,0],[1,1,-.01],[3,1,.02],[2,1,0],[1,3,-.02]]
-  ] },
-  mint: { beat: 440, rest: 440, velocity: .49, gate: .12, phrases: [
-    [[0,.75,.04],[3,.25,-.05],[2,.5,.03],[3,1,-.04],[0,.75,.04],[2,.25,-.05],[3,.5,.02],[2,1,-.03]],
-    [[0,.5,.04],[2,.25,-.05],[3,.75,.02],[2,1,-.03],[0,.75,.04],[3,.25,-.05],[2,1,.02]]
-  ] },
-  black: { beat: 380, rest: 380, velocity: .56, gate: .17, phrases: [
-    [[0,.5,.03],[0,.5,-.02],[0,1,.02],[3,.5,.03],[0,.5,0],[0,1,.03],[3,1,.02],[0,2,.04]],
-    [[0,.5,.03],[0,.5,-.02],[3,1,.03],[0,.5,0],[0,.5,-.02],[3,1,.02],[0,2,.04]]
-  ] },
-  darkbrown: { beat: 620, rest: 620, velocity: .45, phrases: [
-    [[0,.5,.02],[3,.5,0],[1,.5,-.04],[2,.5,-.02],[0,.5,.02],[2,.5,0],[1,.5,-.04],[3,1.5,.02]],
-    [[0,.5,.02],[2,.5,0],[1,.5,-.04],[3,.5,.01],[0,.5,.02],[3,.5,0],[2,.5,-.02],[1,1.5,-.03]]
-  ] },
-  redbrown: { beat: 540, rest: 540, velocity: .46, gate: .24, phrases: [
-    [[0,1,.03],[2,.5,-.03],[3,.5,0],[0,.75,.02],[2,.75,-.03],[3,.5,.01]],
-    [[0,.75,.03],[3,.75,-.02],[2,.5,0],[0,1,.02],[3,.5,-.03],[2,.5,.01]]
-  ] }
+  red: { beat: 520, velocity: .47,
+    call: [[1,4,0],[1,4,0],[2,4,.02],[1,2,-.01],[null,2,0]],
+    turn: [[1,4,0],[1,4,0],[2,4,.02],[3,2,.03],[null,2,0]],
+    answer: [[2,4,.01],[1,4,0],[0,6,-.02],[null,2,0]],
+    variation: [[2,2,.01],[1,2,-.01],[1,4,0],[0,6,-.02],[null,2,0]]
+  },
+  mint: { beat: 440, velocity: .49, gate: .12,
+    call: [[0,2,.04],[null,1,0],[1,1,-.03],[0,2,.02],[null,2,0],[1,2,.01],[2,1,-.04],[1,3,.02],[null,2,0]],
+    turn: [[0,2,.04],[null,1,0],[1,1,-.03],[0,2,.02],[null,2,0],[1,2,.01],[2,1,-.04],[1,1,-.02],[0,2,.03],[null,2,0]],
+    answer: [[0,2,.04],[null,1,0],[1,1,-.03],[2,2,.02],[1,2,-.02],[0,4,.03],[null,4,0]],
+    variation: [[0,2,.04],[null,1,0],[1,1,-.03],[2,2,.02],[1,2,-.02],[0,2,.03],[1,1,-.04],[0,1,.02],[null,4,0]]
+  },
+  black: { beat: 380, velocity: .56, gate: .17,
+    call: [[0,2,.04],[0,2,-.02],[null,2,0],[0,2,.02],[3,4,.01],[0,2,.03],[null,2,0]],
+    turn: [[0,2,.04],[0,2,-.02],[null,2,0],[0,2,.02],[3,2,.01],[3,2,-.02],[0,2,.03],[null,2,0]],
+    answer: [[3,4,.02],[0,4,.03],[0,6,.04],[null,2,0]],
+    variation: [[3,2,.02],[3,2,-.02],[0,4,.03],[0,6,.04],[null,2,0]]
+  },
+  darkbrown: { beat: 620, velocity: .45,
+    call: [[0,2,.02],[1,2,-.02],[2,2,-.03],[3,2,.02],[2,2,-.02],[1,2,-.03],[0,2,.01],[null,2,0]],
+    turn: [[0,2,.02],[1,2,-.02],[2,2,-.03],[3,2,.02],[2,2,-.02],[1,2,-.03],[2,2,.01],[null,2,0]],
+    answer: [[3,2,.02],[2,2,-.02],[1,2,-.03],[2,2,0],[1,2,-.02],[0,4,.02],[null,2,0]],
+    variation: [[3,2,.02],[2,2,-.02],[1,2,-.03],[2,2,0],[1,2,-.02],[0,2,0],[0,2,.02],[null,2,0]]
+  },
+  redbrown: { beat: 540, velocity: .46,
+    call: [[0,3,.03],[1,3,-.03],[2,2,0],[1,3,-.02],[0,3,.02],[null,2,0]],
+    turn: [[0,3,.03],[1,3,-.03],[2,2,0],[3,3,.01],[2,3,-.02],[null,2,0]],
+    answer: [[1,3,-.02],[2,3,0],[1,2,-.03],[0,6,.03],[null,2,0]],
+    variation: [[1,3,-.02],[2,3,0],[1,2,-.03],[0,3,.03],[1,1,-.03],[0,2,.01],[null,2,0]]
+  }
 };
 // Every event shares a sixteenth-note grid. Rest durations are musical time.
 export function rhythmAt(preset, tick) {
@@ -48,14 +61,19 @@ export function rhythmAt(preset, tick) {
 }
 const timelines = Object.fromEntries(Object.entries(scores).map(([id, score]) => {
   let length = 0; const notes = new Map();
-  for (const phrase of score.phrases) {
-    for (const [index, [position, beats, accent]] of phrase.entries()) {
-      // Short rhythm notes are clipped; sustained notes and phrase endings
-      // retain the instrument's natural decay. Bossa is never hard-gated.
-      const gate = id !== 'redbrown' && beats < 1 && index !== phrase.length - 1 ? score.gate : undefined;
-      notes.set(length, { position, accent, gate }); length += beats * 4;
+  for (let cycle = 0; cycle < 4; cycle++) {
+    for (const bar of [score.call, score.call, score.turn, cycle === 3 ? score.variation : score.answer]) {
+      const lastNote = bar.findLastIndex(([position]) => position !== null);
+      for (const [index, [position, ticks, accent]] of bar.entries()) {
+        if (position !== null) {
+          // Short rhythm notes are clipped; each bar's final note keeps its
+          // natural decay across the written rest. Bossa is never hard-gated.
+          const gate = id !== 'redbrown' && ticks < 4 && index !== lastNote ? score.gate : undefined;
+          notes.set(length, { position, accent, gate });
+        }
+        length += ticks;
+      }
     }
-    length += Math.round(score.rest / score.beat * 4);
   }
   return [id, { notes, length }];
 }));
