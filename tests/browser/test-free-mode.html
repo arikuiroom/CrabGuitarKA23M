@@ -1,0 +1,48 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Free mode UI regression</title>
+<style>body{font:14px system-ui;margin:12px}button{min-height:44px}iframe{display:block;width:390px;height:844px;border:0}pre{white-space:pre-wrap}</style>
+<button id="run">Run free mode checks</button><pre id="result">Ready. Keep this tab foregrounded. This checks real Web Audio and synthetic input; physical phone audio/multitouch still need device testing.</pre>
+<iframe id="app" src="../../dist/index.html"></iframe>
+<script type="module">
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+run.onclick=async()=>{
+ run.disabled=true;const checks=[];
+ try{
+  const w=app.contentWindow,d=w.document,$=s=>d.querySelector(s),scene=$('.scene'),button=$('#freeMode');
+  const assert=(ok,label)=>{if(!ok)throw Error(label);checks.push(label);result.textContent=JSON.stringify({running:true,checks},null,2)},
+   on=()=>button.getAttribute('aria-pressed')==='true',count=()=>Number(scene.dataset.plucks||0),
+   until=async(fn,timeout=1800)=>{const start=performance.now();while(!fn()&&performance.now()-start<timeout)await sleep(25);return fn()},
+   start=async()=>{button.click();assert(on(),'ON is explicit');const before=count();assert(await until(()=>count()>before),'ON produces a note')},
+   staysOff=async()=>{assert(!on(),'Mode is OFF');const before=count();await sleep(700);assert(count()===before,'No automatic resumption')};
+  assert(!on()&&count()===0,'Initial visit is silent');
+  const rect=button.getBoundingClientRect();assert(rect.width>=44&&rect.height>=44,'44px touch target');
+  assert(d.documentElement.scrollWidth<=w.innerWidth,'No horizontal document overflow');
+  const script=d.createElement('script');script.type='module';script.textContent=`import{GuitarAudio}from'./audio.js?v=18';window.freeProbe={notes:[]};const pluck=GuitarAudio.prototype.pluck;GuitarAudio.prototype.pluck=function(f,v,i,...rest){window.freeProbe.audio=this;window.freeProbe.notes.push({f,v,i,preset:this.preset});return pluck.call(this,f,v,i,...rest)};`;d.body.append(script);await sleep(80);
+  await start();button.click();await staysOff();
+  for(let i=0;i<20;i++){button.click();button.click()}await staysOff();
+  await start();$('#stringboard').children[2].click();await staysOff();
+  await start();w.dispatchEvent(new w.KeyboardEvent('keydown',{key:'2',bubbles:true}));await staysOff();
+  const svg=$('#instrument');svg.setPointerCapture=()=>{};
+  const point=(x,y)=>{const p=svg.createSVGPoint();p.x=x;p.y=y;return p.matrixTransform($('#actualStrings').getScreenCTM())};
+  const touch=async(x,y)=>{const p=point(x,y);svg.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:71,pointerType:'touch',button:0,bubbles:true,clientX:p.x,clientY:p.y}));svg.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:71,pointerType:'touch',button:0,bubbles:true,clientX:p.x,clientY:p.y}));await staysOff()};
+  await start();await touch(1013,575);
+  await start();await touch(422,452);
+  await start();await touch(974,845);
+  await start();$('#mute').click();await staysOff();button.click();assert(!on(),'Cannot enable while muted');$('#mute').click();
+  await start();$('#volume').value='0';$('#volume').dispatchEvent(new w.Event('input'));await staysOff();button.click();assert(!on(),'Cannot enable at zero volume');$('#volume').value='45';$('#volume').dispatchEvent(new w.Event('input'));
+  for(const event of ['blur','pagehide']){await start();w.dispatchEvent(new w.Event(event));await staysOff()}
+  await start();Object.defineProperty(d,'hidden',{configurable:true,value:true});d.dispatchEvent(new w.Event('visibilitychange'));await staysOff();delete d.hidden;
+  await start();$('#stop').click();await staysOff();
+  await start();$('[data-chord="C"]').click();$('[data-preset="mint"]').click();const mark=w.freeProbe.notes.length;await sleep(2700);
+  const notes=w.freeProbe.notes.slice(mark);assert(notes.length>0&&notes.every(n=>n.i!==0),'Current C chord skips muted sixth string');
+  assert(scene.dataset.preset==='mint'&&on(),'Preset changes keep selected sound and free mode');
+  button.click();await staysOff();
+  assert(await until(()=>w.freeProbe.audio.liveVoices.size===0,4000),'OFF drains live voices');
+  const audio=w.freeProbe.audio,unlock=audio.unlock;let release;
+  audio.unlock=()=>new Promise(resolve=>release=resolve);
+  button.click();assert(on(),'Pending unlock shows cancellable ON');$('#mute').click();release();await staysOff();
+  audio.unlock=unlock;$('#mute').click();
+  result.textContent=JSON.stringify({passed:true,checks},null,2);
+ }catch(e){result.textContent=JSON.stringify({passed:false,error:String(e),checks},null,2)}finally{run.disabled=false}
+};
+</script>

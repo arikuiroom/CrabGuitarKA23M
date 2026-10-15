@@ -103,3 +103,9 @@ footer{margin-top:10px}
 
 /* Claw touch remains a mute target; its guide stays invisible even while held. */
 #palmHint,#palmLabel{display:none}
+
+/* Explicit opt-in, with a full touch target even in the compact player. */
+.free-mode-button{flex:none;min-width:64px;min-height:44px;padding:0 8px;border:1px solid #cbd5c2;border-radius:10px;background:#f7f8ef;color:#66765e;font-size:11px;white-space:nowrap;margin-left:auto;margin-right:8px;touch-action:manipulation}
+.free-mode-button[aria-pressed=true]{background:#344b38;border-color:#344b38;color:#fffef5}
+@media(max-width:760px),(max-height:740px){.free-mode-button{margin-left:0;margin-right:6px;min-width:60px;padding-inline:6px}.player .player-heading{display:flex;align-items:center}}
+@media(max-width:420px){.player-footer label{display:none}.player-footer output{display:none}.player{gap:5px}.player-footer{gap:5px}}
