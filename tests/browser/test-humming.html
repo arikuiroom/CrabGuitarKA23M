@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Humming UI and privacy regression</title>
+<style>body{font:14px/1.5 system-ui;margin:12px}button{min-height:44px;padding:6px 14px}iframe{display:block;width:390px;height:844px;border:1px solid #ddd;margin-top:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:1000px;max-height:160px;overflow:auto}</style></head><body>
+<button id="run" disabled>Run synthetic humming checks</button>
+<pre id="result">Loading. No real microphone is requested. This fixture replaces getUserMedia before loading the app. It can play synthesized guitar notes. Keep this page in the foreground.</pre>
+<iframe id="app" title="Humming app under synthetic microphone tests"></iframe>
+<script type="module">
+const run=document.querySelector('#run'),result=document.querySelector('#result'),app=document.querySelector('#app');
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const until=async(fn,timeout=3000)=>{const begin=performance.now();while(!fn()&&performance.now()-begin<timeout)await sleep(20);return fn();};
+
+// This runs in the child before any production module. The real media API is
+// never called, even if a test or implementation unexpectedly requests twice.
+function installMocks(GuitarAudio){
+ const probe=window.hummingProbe={requests:[],streams:[],notes:[],percussion:[],errors:[],captureEdges:[],disconnections:0,plan:'tone',ready:false};
+ window.addEventListener('error',e=>probe.errors.push(String(e.error||e.message)));
+ window.addEventListener('unhandledrejection',e=>probe.errors.push(String(e.reason)));
+ class Track extends EventTarget{
+  constructor(){super();this.kind='audio';this.readyState='live';this.enabled=true;this.muted=false;this.stopCalls=0;}
+  stop(){this.stopCalls++;this.readyState='ended';}
+  end(){this.readyState='ended';this.dispatchEvent(new Event('ended'));}
+ }
+ const stream=()=>{const track=new Track(),value={__syntheticHumming:true,track,started:performance.now(),plan:probe.plan,getTracks:()=>[track],getAudioTracks:()=>[track]};Object.defineProperty(value,'active',{get:()=>track.readyState==='live'});probe.streams.push(value);return value;};
+ probe.live=()=>probe.streams.filter(s=>s.active).length;
+ const mediaDevices={getUserMedia:constraints=>{
+  const request={constraints,created:performance.now(),plan:probe.plan};probe.requests.push(request);
+  if(probe.plan==='denied')return Promise.reject(new DOMException('Synthetic permission denial','NotAllowedError'));
+  if(probe.plan==='missing')return Promise.reject(new DOMException('Synthetic missing microphone','NotFoundError'));
+  if(probe.plan==='deferred')return new Promise((resolve,reject)=>{request.resolve=()=>{const s=stream();s.plan='tone';request.stream=s;resolve(s);return s;};request.reject=reject;});
+  const s=stream();request.stream=s;return Promise.resolve(s);
+ }};
+ Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:mediaDevices});
+ const Context=window.AudioContext||window.webkitAudioContext;
+ if(!Context)throw new Error('This fixture requires Web Audio support.');
+ Context.prototype.createMediaStreamSource=function(s){
+  if(!s?.__syntheticHumming)throw new Error('Real microphone sources are forbidden in this fixture.');
+  const node=this.createGain(),nativeConnect=node.connect.bind(node),nativeDisconnect=node.disconnect.bind(node),rate=this.sampleRate;
+  node.connect=function(target,...args){
+   probe.captureEdges.push({source:'capture',target:target.constructor.name});
+   if(typeof target.getFloatTimeDomainData!=='function')throw new Error('Capture must connect only to an analyser.');
+   target.getFloatTimeDomainData=values=>{
+    const t=(performance.now()-s.started)/1000;
+    // Three separated pitches with a short leading silence; no source node
+    // emits these samples and therefore they cannot reach the speakers.
+    const frequency=s.plan==='silence'||!s.active?0:t<.12?0:t<.56?220:t<.72?0:t<1.15?261.625565:t<1.31?0:329.627557;
+    for(let i=0;i<values.length;i++)values[i]=frequency?.18*Math.sin(2*Math.PI*frequency*i/rate)+.025*Math.sin(4*Math.PI*frequency*i/rate):0;
+   };
+   target.connect=function(...connections){probe.captureEdges.push({source:'capture-analyser',target:connections[0]?.constructor.name});throw new Error('Capture analyser must never connect to output.');};
+   return nativeConnect(target,...args);
+  };
+  node.disconnect=function(...args){probe.disconnections++;return nativeDisconnect(...args);};
+  return node;
+ };
+ for(const method of ['pluck','pluckHarmonic']){
+  const original=GuitarAudio.prototype[method];
+  GuitarAudio.prototype[method]=function(...args){probe.audio=this;probe.notes.push({method,frequency:args[0],string:args[2],gate:args[3],preset:this.preset,time:performance.now(),liveMic:probe.live()});return original.apply(this,args);};
+ }
+ const percussion=GuitarAudio.prototype.playPercussion;
+ GuitarAudio.prototype.playPercussion=function(...args){probe.percussion.push(args);return percussion.apply(this,args);};
+ const unlock=GuitarAudio.prototype.unlock;
+ GuitarAudio.prototype.unlock=function(...args){probe.audio=this;return unlock.apply(this,args);};
+}
+
+async function prepare(){
+ const html=await (await fetch('../../dist/index.html')).text();
+ const match=html.match(/<script\b[^>]*src="([^"]*app\.js[^\"]*)"[^>]*><\/script>/);
+ if(!match)throw new Error('App module script was not found. Build the humming app first.');
+ const appURL=new URL(match[1],new URL('../../dist/',location.href));
+ const appSource=await (await fetch(appURL)).text();
+ const audioImport=appSource.match(/from\s*['"]([^'"]*audio\.js[^'"]*)['"]/);
+ if(!audioImport)throw new Error('Exact GuitarAudio import was not found.');
+ const audioURL=new URL(audioImport[1],appURL).href;
+ const code=`import {GuitarAudio} from ${JSON.stringify(audioURL)};(${installMocks.toString()})(GuitarAudio);await import(${JSON.stringify(appURL.href)});window.hummingProbe.ready=true;`;
+ const bootstrap='<script type="module">'+code+'</scr'+'ipt>';
+ const base='<base href="'+new URL('../../dist/',location.href).href+'">';
+ app.srcdoc=html.replace('<head>','<head>'+base).replace(match[0],bootstrap);
+ if(!await until(()=>app.contentWindow?.hummingProbe?.ready,7000))throw new Error('Mocked app did not become ready: '+JSON.stringify(app.contentWindow?.hummingProbe?.errors||[]));
+ run.disabled=false;result.textContent='Ready. No real microphone will be used. Click Run; synthesized guitar notes may sound. Physical iPhone/Safari microphone capture still needs a separate user-operated device test.';
+}
+
+run.onclick=async()=>{
+ run.disabled=true;const checks=[];let probe;
+ const assert=(ok,label)=>{if(!ok)throw new Error(label);checks.push(label);result.textContent=JSON.stringify({running:true,checks},null,2);};
+ try{
+  if(app.contentWindow?.hummingProbe?.requests.length||app.contentWindow?.hummingProbe?.notes.length){await prepare();run.disabled=true;}
+  const w=app.contentWindow,d=w.document,$=selector=>d.querySelector(selector),scene=$('.scene');probe=w.hummingProbe;
+  const state=()=>scene.dataset.hummingState,notes=()=>probe.notes.length,busy=()=>['requesting','listening','processing','playing'].includes(state());
+  const cancel=()=>$('#hummingStop').click();
+  const svg=$('#instrument');svg.setPointerCapture=()=>{};let pointerId=90;
+  const touchString=(index=3)=>{const path=$('#actual-'+index),point=path.getPointAtLength(path.getTotalLength()*.35).matrixTransform(path.getScreenCTM());pointerId++;for(const type of ['pointerdown','pointerup'])svg.dispatchEvent(new w.PointerEvent(type,{pointerId,pointerType:'touch',button:0,bubbles:true,clientX:point.x,clientY:point.y}));};
+  const begin=async(plan='tone')=>{probe.plan=plan;$('#listen').click();assert(await until(()=>state()==='listening'),'Start reaches listening with a synthetic stream');return probe.streams.at(-1);};
+  const quietAfter=async(label,delay=180)=>{const n=notes();await sleep(delay);assert(notes()===n,label);};
+  assert(probe.requests.length===0&&notes()===0,'Opening the page neither asks for mic access nor plays');
+  assert($('#listen')&&!$('#listen').disabled&&$('#hummingStatus')&&$('#hummingPrivacy'),'Listen, status and privacy explanation are present');
+  assert(/保存|送信/.test($('#hummingPrivacy').textContent),'Visible privacy copy explains local/no-upload behavior');
+  assert(!$('#freeMode'),'Free mode control is absent');
+  assert(!w.performance.getEntriesByType('resource').some(e=>/free-mode\.js/.test(e.name)),'Free scheduler is not imported at runtime');
+  for(const [width,height]of [[390,844],[320,568],[844,390]]){
+   app.style.width=width+'px';app.style.height=height+'px';await sleep(70);
+   assert(d.documentElement.scrollWidth<=w.innerWidth+1,`No horizontal overflow at ${width}×${height}`);
+   for(const id of ['listen','hummingPrivacy']){const el=$('#'+id),r=el.getBoundingClientRect();assert(w.getComputedStyle(el).display!=='none'&&r.width>0&&r.height>0,`${id} remains rendered at ${width}×${height}`);assert(r.left>=-1&&r.right<=w.innerWidth+1&&r.top>=-1&&r.bottom<=w.innerHeight+1,`${id} stays fully inside the viewport at ${width}×${height}`);}
+   const r=$('#listen').getBoundingClientRect();assert(r.width>=44&&r.height>=44,`Listen is a 44px touch target at ${width}×${height}`);
+  }
+  app.style.width='390px';app.style.height='844px';await sleep(60);
+  // Existing five color/sound controls and ordinary hand play still work.
+  for(const preset of ['red','mint','black','darkbrown','redbrown']){
+   $('[data-preset="'+preset+'"]').click();const before=notes();$('#stringboard').children[4].click();
+   assert(await until(()=>notes()>before),preset+' permits ordinary manual plucking');
+   assert(probe.notes.at(-1).preset===preset&&scene.dataset.preset===preset,preset+' keeps its selected sound and visible color');
+  }
+  $('#stop').click();$('[data-preset="red"]').click();const beforeTouch=notes();touchString();assert(await until(()=>notes()>beforeTouch),'Direct SVG string touch still plays');$('#stop').click();
+  // Pending permission is cancellable; a later grant must be stopped, unused.
+  probe.plan='deferred';$('#listen').click();assert(state()==='requesting'&&!$('#hummingStop').hidden,'Pending permission exposes Cancel');
+  const pending=probe.requests.at(-1),beforePending=notes();$('#stringboard').children[0].click();w.dispatchEvent(new w.KeyboardEvent('keydown',{key:'2',bubbles:true}));
+  assert(notes()===beforePending,'Manual inputs are silent while permission is pending');
+  w.dispatchEvent(new w.Event('blur'));assert(state()==='requesting','Permission-dialog blur does not abort the request');
+  cancel();assert(!busy()&&!$('#listen').disabled,'Cancel restores an available Listen button');
+  const late=pending.resolve();await sleep(100);assert(late.track.readyState==='ended'&&late.track.stopCalls>0,'Late granted track is immediately stopped');
+  await quietAfter('Cancelled permission never starts a reply');
+  for(const plan of ['denied','missing']){
+   probe.plan=plan;$('#listen').click();assert(await until(()=>state()==='error'),plan+' reaches a clear error state');
+   assert(!$('#listen').disabled&&$('#hummingStop').hidden&&probe.live()===0,plan+' leaves no live track and permits retry');
+  }
+  const captured=await begin();const beforeCapture=notes();
+  assert($('#listen').disabled&&!$('#hummingFinish').hidden&&!$('#hummingStop').hidden,'Listening shows Finish and Stop, and prevents duplicate starts');
+  touchString();$('#stringboard').children[1].click();w.dispatchEvent(new w.KeyboardEvent('keydown',{key:'3',bubbles:true}));await sleep(1700);
+  assert(notes()===beforeCapture,'No guitar note is emitted while the microphone is live');
+  $('#hummingFinish').click();
+  assert(await until(()=>state()==='playing'||state()==='done'),'Early finish produces an echo');
+  assert(captured.track.readyState==='ended'&&probe.live()===0,'Microphone is released before the echo');
+  assert(await until(()=>notes()>beforeCapture),'Synthetic melody produces guitar notes');
+  assert(await until(()=>state()==='done',5000),'Echo finishes without looping');
+  const echo=probe.notes.slice(beforeCapture),midis=echo.map(note=>Math.round(69+12*Math.log2(note.frequency/440)));
+  assert(echo.length>=3&&echo.every(note=>note.string===5),'Echo is a recognizable multi-note single treble-string phrase');
+  assert(midis.includes(57)&&midis.includes(60)&&midis.includes(64),'Detected synthetic A3, C4 and E4 pitches survive playback');
+  assert(echo.every(note=>note.liveMic===0),'Every echo note occurs after all microphone tracks stopped');
+  await quietAfter('Completed phrase does not resume automatically',500);
+  // Silence is a visible retry result, never a random fallback tune.
+  await begin('silence');const beforeSilence=notes();await sleep(400);$('#hummingFinish').click();
+  assert(await until(()=>state()==='error'),'Silence yields a no-notes error');
+  assert(notes()===beforeSilence&&probe.live()===0,'Silence releases mic without invented notes');
+  // Active capture must end on lifecycle changes, with no automatic return.
+  for(const event of ['blur','pagehide','visibilitychange']){
+   const s=await begin();
+   if(event==='visibilitychange'){Object.defineProperty(d,'hidden',{configurable:true,value:true});d.dispatchEvent(new w.Event(event));delete d.hidden;d.dispatchEvent(new w.Event(event));}
+   else w.dispatchEvent(new w.Event(event));
+   assert(await until(()=>!busy()),event+' cancels active capture');
+   assert(s.track.readyState==='ended'&&probe.live()===0,event+' releases microphone track');
+   await quietAfter(event+' never automatically restarts capture or playback');
+  }
+  // A hardware/OS interruption is different from application track.stop().
+  const interrupted=await begin();interrupted.track.end();
+  assert(await until(()=>!busy()),'Ended microphone track exits active capture');
+  assert(probe.live()===0,'Device-ended track leaves no active capture');
+  for(let i=0;i<3;i++){const s=await begin();cancel();assert(s.track.readyState==='ended'&&!busy(),'Repeated start/cancel cleans up cycle '+(i+1));}
+  // Cancelling reply through ordinary strings must cancel all later notes.
+  await begin();await sleep(1700);$('#hummingFinish').click();assert(await until(()=>state()==='playing'),'Second phrase enters playback');
+  $('#stringboard').children[2].click();assert(!busy(),'Manual string interrupts automatic reply');await sleep(100);await quietAfter('Interrupted reply has no delayed notes',900);
+  $('#stop').click();
+  assert(probe.requests.every(request=>request.constraints.audio&&request.constraints.video!==true),'Only audio is requested; no video capture');
+  assert(probe.captureEdges.every(edge=>edge.source==='capture'&&edge.target==='AnalyserNode'),'Capture graph is source→analyser only; no destination');
+  assert(probe.streams.every(s=>s.track.readyState==='ended'),'All acquired synthetic microphone tracks have stopped');
+  assert(probe.disconnections>=probe.streams.length-1,'Every connected capture source has been disconnected');
+  assert(probe.percussion.length===0,'No percussion playback runs in humming mode');
+  assert(probe.errors.length===0,'No uncaught errors or unhandled rejections');
+  result.textContent=JSON.stringify({passed:true,checks,requests:probe.requests.length,tracks:probe.streams.length,echoMidi:midis,notes:probe.notes.length,realMicrophoneUsed:false,deviceLimit:'Synthetic browser test only. Real iPhone/Safari capture, permission prompts and acoustic pitch quality are not verified.'},null,2);
+ }catch(error){result.textContent=JSON.stringify({passed:false,error:String(error.stack||error),checks,state:app.contentWindow.document.querySelector('.scene')?.dataset,probeErrors:probe?.errors,notes:probe?.notes.slice(-12),realMicrophoneUsed:false},null,2);}
+ finally{app.contentWindow.document.querySelector('#hummingStop')?.click();app.contentWindow.document.querySelector('#stop')?.click();run.disabled=false;}
+};
+prepare().catch(error=>{result.textContent=String(error.stack||error);});
+</script></body></html>

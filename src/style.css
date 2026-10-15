@@ -109,3 +109,23 @@ footer{margin-top:10px}
 .free-mode-button[aria-pressed=true]{background:#344b38;border-color:#344b38;color:#fffef5}
 @media(max-width:760px),(max-height:740px){.free-mode-button{margin-left:0;margin-right:6px;min-width:60px;padding-inline:6px}.player .player-heading{display:flex;align-items:center}}
 @media(max-width:420px){.player-footer label{display:none}.player-footer output{display:none}.player{gap:5px}.player-footer{gap:5px}}
+
+/* A separate, explicit microphone gesture; privacy text remains visible on mobile. */
+.humming-panel{margin:0 0 20px;min-width:0;grid-column:1/-1}
+.humming-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.humming-row button{min-height:44px;min-width:60px;border:1px solid #aebb9f;border-radius:11px;padding:8px 12px;background:#eef2e6;font-size:12px;touch-action:manipulation}
+.humming-row #listen{background:#344b38;color:#fffef5;border-color:#344b38;font-weight:600}
+.humming-row button:disabled{opacity:.55;cursor:default}
+.humming-row [hidden],#hummingProgress[hidden]{display:none}
+#hummingStatus{flex:1;min-width:115px;font-size:11px;line-height:1.5;color:#586a50}
+#hummingPrivacy{font-size:10px;line-height:1.5;color:#727b69;margin:7px 0 0}
+#hummingProgress{width:100%;height:5px;accent-color:#788c66;margin-top:6px;display:block}
+@media(max-width:760px),(max-height:740px),(display-mode:standalone){
+ .player{display:grid;grid-template-columns:40px minmax(0,1fr);gap:3px 8px;padding:7px 9px;max-width:none}
+ .humming-panel{margin:0;padding-bottom:4px;width:100%}
+ .humming-row{gap:5px;flex-wrap:nowrap}
+ .humming-row button{min-width:52px;padding:6px 8px}
+ #hummingStatus{min-width:0;font-size:10px}
+ #hummingPrivacy{font-size:9px;margin-top:4px;line-height:1.35}
+ .player-heading{grid-column:1}.player-footer{grid-column:2;width:100%}
+}

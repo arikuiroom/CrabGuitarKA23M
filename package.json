@@ -11,11 +11,12 @@
     "build": "node scripts/build.mjs",
     "dev": "node scripts/serve.mjs --watch",
     "preview": "node scripts/serve.mjs",
-    "test": "npm run test:build && npm run test:free && npm run test:audio && npm run test:sprites",
+    "test": "npm run test:build && npm run test:free && npm run test:audio && npm run test:sprites && npm run test:humming",
     "test:build": "node --test tests/build/*.test.mjs",
     "test:free": "node --test tests/free/*.test.mjs",
     "test:audio": "node tests/audio/test-audio.mjs",
     "verify:baseline": "node scripts/verify-baseline.mjs",
-    "test:sprites": "node --test tests/sprites/*.test.mjs"
+    "test:sprites": "node --test tests/sprites/*.test.mjs",
+    "test:humming": "node --test tests/humming/*.test.mjs"
   }
 }

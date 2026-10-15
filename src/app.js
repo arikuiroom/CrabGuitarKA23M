@@ -1,4 +1,4 @@
-import {createFreeMode, freeStrings} from './free-mode.js?v=25';
+import {createHummingMode} from './humming.js?v=h1';
 import {GuitarAudio} from './audio.js?v=23';
 import {mountSpriteParts, createSpritePainter, SPRITE_HIT_REGIONS, STRING_SEGMENTS, stringPosition} from './sprite-parts.js?v=23';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -15,23 +15,30 @@ spriteStatus.id='spriteStatus';spriteStatus.setAttribute('role','status');sprite
 $('.preset-controls').append(spriteStatus);
 const spritePainter=createSpritePainter(instrument,{onState:state=>{spriteStatus.hidden=state==='ready';spriteStatus.textContent=state==='loading'?'画像を読み込み中…':state==='error'?'画像を読み込めません。色ボタンで再試行':'';}});
 const {palm: palmRegion, arm: armRegion}=SPRITE_HIT_REGIONS;
-const freeButton=$('#freeMode');
-const freeMode=createFreeMode({
- unlock:()=>audio.unlock(), percussion:(kind,level)=>{if(audio.playPercussion(kind,level))wakeSound()}, silence:()=>audio.stopPercussion(), play:(i,velocity,gate,frequency)=>play(i,velocity,false,gate,frequency),
- getChord:()=>chord, getSupportStrings:()=>freeStrings(chord,chords[chord],'black'), getStrings:preset=>freeStrings(chord,chords[chord],preset), getPreset:()=>scene.dataset.preset,
- canStart:()=>!document.hidden,
- canPlay:(requireRunning=true)=>!document.hidden&&!muted&&audio.volume>0&&!palmPointers.size&&armPointer===null&&(!requireRunning||audio.context?.state==='running'),
- onChange:(active,paused=false)=>{++playEpoch;freeButton.setAttribute('aria-pressed',String(active));freeButton.textContent=paused?'自由 再開':active?'自由 ON':'自由 OFF';freeButton.setAttribute('aria-label',paused?'自由モードを再開する':active?'自由モードをオフにする':'自由モードをオンにする');freeButton.title=paused?'自動演奏は一時停止中です。押すと再開します':'弦を弾いても自動演奏は続きます。ボタンでオン・オフ';scene.dataset.freeMode=String(active);scene.dataset.freePaused=String(paused);},
- onError:error=>{$('#soundState').textContent='音を出せませんでした。もう一度タップ';console.error('Free mode audio initialization failed',error);}
+let hummingState='idle';
+const humming=createHummingMode({
+ getContext:()=>audio.context, unlock:()=>audio.unlock(),
+ stopAudio:()=>{++playEpoch;audio.stopAll();},
+ play:(midi,duration)=>{if(!document.hidden&&!muted&&audio.volume>0&&!palmPointers.size&&armPointer===null)play(5,.55,false,duration,440*2**((midi-69)/12));},
+ onState:(status,details={})=>{
+  hummingState=status;scene.dataset.hummingState=status;
+  const busy=['requesting','listening','processing','playing'].includes(status);
+  $('#listen').disabled=busy;$('#hummingFinish').hidden=status!=='listening';$('#hummingStop').hidden=!busy;
+  const labels={idle:'2〜4秒、鼻歌をきかせて。',requesting:'マイクの許可を待っています…',listening:'きいてるよ。鼻歌をどうぞ',processing:'メロディにしています…',playing:'まねして弾くね ♪',done:'もう一度、きかせて。'};
+  const message=details.message||labels[status]||'もう一度試してください。';if($('#hummingStatus').textContent!==message)$('#hummingStatus').textContent=message;
+  $('#hummingProgress').hidden=status!=='listening';$('#hummingProgress').value=details.progress||0;
+ }
 });
-freeButton.addEventListener('click',()=>{if(freeMode.active&&!freeMode.paused){freeMode.stop();audio.stopAll();$('#soundState').textContent='自由モードを止めました';}else freeMode.start();});
+$('#listen').addEventListener('click',()=>{if(document.hidden)return;if(muted||audio.volume===0){$('#hummingStatus').textContent='ミュートを解除して、音量を上げてから聴かせてね。';return;}humming.start();});
+$('#hummingFinish').addEventListener('click',()=>humming.stopListening());
+$('#hummingStop').addEventListener('click',()=>humming.cancel());
 const midiName=f=>['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'][(Math.round(69+12*Math.log2(f/440))%12+12)%12];
 for(let i=0;i<6;i++){
  const b=document.createElement('button');b.className='string-button';b.dataset.string=i;b.style.setProperty('--thickness',`${3-i*.36}px`);b.innerHTML=`<span class="note">${names[i]}</span><span class="wire"></span><span class="number">${6-i}</span>`;b.setAttribute('aria-label',`${6-i}弦 ${names[i]}を弾く`);board.append(b);
  b.addEventListener('click',e=>{if(e.detail===0){play(i);}});
  const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.id=`actual-${i}`;path.setAttribute('d',`M ${STRING_SEGMENTS[i][0]} ${STRING_SEGMENTS[i][1]} L ${STRING_SEGMENTS[i][2]} ${STRING_SEGMENTS[i][3]}`);path.classList.add('actual-string');$('#actualStrings').append(path);
 }
-async function play(i,velocity=.72,harmonic=false,gate,autoFrequency){harmonic=harmonic&&scene.dataset.preset!=='redbrown';if(armPointer!==null||palmPointers.size||i<0||i>5||chords[chord][i]===null)return;const epoch=playEpoch;const frequency=Number.isFinite(autoFrequency)&&autoFrequency>0?autoFrequency:bases[i]*2**(chords[chord][i]/12);const button=board.children[i],wire=$(`#actual-${i}`);clearTimeout(flashes.get(i));button.classList.remove('playing');button.classList.add('playing');wire.classList.add('playing');flashes.set(i,setTimeout(()=>{button.classList.remove('playing');wire.classList.remove('playing');},500));$('#lastNote').textContent=harmonic?'✧ '+midiName(frequency):midiName(frequency);$('#mood').textContent=harmonic?'✧ キーン':'♪ ぽろん';scene.dataset.plucks=String(++plucks);scene.dataset.lastFrequency=frequency.toFixed(3);scene.dataset.lastTechnique=harmonic?'harmonic':'normal';try{if(audio.context?.state!=='running')await audio.unlock();if(epoch!==playEpoch||palmPointers.size||armPointer!==null)return;if(harmonic)audio.pluckHarmonic(frequency,velocity,i);else audio.pluck(frequency,velocity,i,gate);wakeSound();$('#soundState').textContent=muted?'ミュート中':harmonic?'ピッキングハーモニクス':'音あそび中';$('#soundDot').classList.toggle('on',!muted);}catch(error){$('#soundState').textContent='音を出せませんでした。もう一度タップ';console.error('Audio initialization failed',error);}}
+async function play(i,velocity=.72,harmonic=false,gate,autoFrequency){if(['requesting','listening','processing'].includes(hummingState))return;if(hummingState==='playing'&&!Number.isFinite(autoFrequency))humming.cancel();harmonic=harmonic&&scene.dataset.preset!=='redbrown';if(armPointer!==null||palmPointers.size||i<0||i>5||chords[chord][i]===null)return;const epoch=playEpoch;const frequency=Number.isFinite(autoFrequency)&&autoFrequency>0?autoFrequency:bases[i]*2**(chords[chord][i]/12);const button=board.children[i],wire=$(`#actual-${i}`);clearTimeout(flashes.get(i));button.classList.remove('playing');button.classList.add('playing');wire.classList.add('playing');flashes.set(i,setTimeout(()=>{button.classList.remove('playing');wire.classList.remove('playing');},500));$('#lastNote').textContent=harmonic?'✧ '+midiName(frequency):midiName(frequency);$('#mood').textContent=harmonic?'✧ キーン':'♪ ぽろん';scene.dataset.plucks=String(++plucks);scene.dataset.lastFrequency=frequency.toFixed(3);scene.dataset.lastTechnique=harmonic?'harmonic':'normal';try{if(audio.context?.state!=='running')await audio.unlock();if(epoch!==playEpoch||palmPointers.size||armPointer!==null)return;if(harmonic)audio.pluckHarmonic(frequency,velocity,i);else audio.pluck(frequency,velocity,i,gate);wakeSound();$('#soundState').textContent=muted?'ミュート中':harmonic?'ピッキングハーモニクス':'音あそび中';$('#soundDot').classList.toggle('on',!muted);}catch(error){$('#soundState').textContent='音を出せませんでした。もう一度タップ';console.error('Audio initialization failed',error);}}
 function boardPosition(e){const r=board.getBoundingClientRect(),value=(e.clientX-r.left-5)/(r.width-10)*6-.5;return {value,sides:Array.from({length:6},(_,i)=>value-i),normalX:1,normalY:0,tangentX:0,tangentY:1,along:e.clientY>=r.top&&e.clientY<=r.bottom,inside:e.clientY>=r.top&&e.clientY<=r.bottom&&e.clientX>=r.left&&e.clientX<=r.right};}
 function instrumentPosition(e){
  const matrix=$('#actualStrings').getScreenCTM();if(!matrix)return{value:0,inside:false};
@@ -67,8 +74,8 @@ function attach(surface,position){
   if(e.button!==0&&e.pointerType==='mouse')return;const p=position(e);
   if(armPointer!==null&&!p.arm&&!p.palm)return;if(!p.inside&&!p.palm&&!p.arm&&!p.sides)return;if(p.arm&&armPointer!==null)return;
   e.preventDefault();surface.setPointerCapture(e.pointerId);
-  if(p.arm){audio.stopPercussion();armPointer=e.pointerId;scene.dataset.armGestures=String(Number(scene.dataset.armGestures||0)+1);++playEpoch;for(const [id,held]of pointers)if(!held.palm){clearTimeout(held.onsetTimer);pointers.delete(id)}const m=$('#actualStrings').getScreenCTM(),ax=m.c-.17*m.a,ay=m.d-.17*m.b,length=Math.hypot(ax,ay);pointers.set(e.pointerId,{surface,arm:true,startX:e.clientX,startY:e.clientY,axisX:ax/length,axisY:ay/length});setArmBend(0);return;}
-  if(p.palm){palmPointers.add(e.pointerId);pointers.set(e.pointerId,{surface,palm:true});dampChanged();return;}
+  if(p.arm){if(['requesting','listening','processing','playing'].includes(hummingState))humming.cancel();audio.stopPercussion();armPointer=e.pointerId;scene.dataset.armGestures=String(Number(scene.dataset.armGestures||0)+1);++playEpoch;for(const [id,held]of pointers)if(!held.palm){clearTimeout(held.onsetTimer);pointers.delete(id)}const m=$('#actualStrings').getScreenCTM(),ax=m.c-.17*m.a,ay=m.d-.17*m.b,length=Math.hypot(ax,ay);pointers.set(e.pointerId,{surface,arm:true,startX:e.clientX,startY:e.clientY,axisX:ax/length,axisY:ay/length});setArmBend(0);return;}
+  if(p.palm){if(['requesting','listening','processing','playing'].includes(hummingState))humming.cancel();palmPointers.add(e.pointerId);pointers.set(e.pointerId,{surface,palm:true});dampChanged();return;}
   const held={...p,surface,pending:p.inside&&p.harmonic,maxDistance:0,start:p,startX:e.clientX,startY:e.clientY,started:performance.now()};pointers.set(e.pointerId,held);if(audio.context?.state!=='running')audio.unlock().catch(()=>{});
   if(p.inside&&!p.harmonic)play(index(p));
  });
@@ -94,13 +101,13 @@ for(const type of ['pointerup','pointercancel'])window.addEventListener(type,e=>
 attach(board,boardPosition);attach(instrument,instrumentPosition);
 function selectChord(b){chord=b.dataset.chord;$$('[data-chord]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));for(let i=0;i<6;i++){const disabled=chords[chord][i]===null,f=bases[i]*2**((chords[chord][i]||0)/12),note=disabled?'×':midiName(f);board.children[i].querySelector('.note').textContent=note;board.children[i].classList.toggle('disabled',disabled);board.children[i].setAttribute('aria-label',disabled?`${6-i}弦はこのコードでは鳴らしません`:`${6-i}弦 ${note}を弾く`);}$('#mood').textContent=chord==='open'?'きいてるよ':`${chord} のきぶん`;}
 $$('[data-chord]').forEach(b=>{b.addEventListener('pointerdown',e=>{if(e.button!==0&&e.pointerType==='mouse')return;e.preventDefault();selectChord(b);});b.addEventListener('click',e=>{if(e.detail===0)selectChord(b);});});
-$('#mute').addEventListener('click',()=>{muted=!muted;audio.mute(muted);wakeSound();$('#mute').setAttribute('aria-pressed',String(muted));$('#mute').setAttribute('aria-label',muted?'ミュートを解除する':'ミュートにする');$('#soundState').textContent=muted?'ミュート中':'ふれると音が出ます';$('#soundDot').classList.toggle('on',!muted);});
-$('#volume').addEventListener('input',e=>{audio.setVolume(Number(e.target.value)/100);wakeSound();$('#volumeValue').value=`${e.target.value}%`;});audio.setVolume(.45);
-$('#stop').addEventListener('click',()=>{freeMode.pause();++playEpoch;audio.stopAll();$('#soundState').textContent='音を止めました';});
+$('#mute').addEventListener('click',()=>{muted=!muted;if(muted)humming.cancel();audio.mute(muted);wakeSound();$('#mute').setAttribute('aria-pressed',String(muted));$('#mute').setAttribute('aria-label',muted?'ミュートを解除する':'ミュートにする');$('#soundState').textContent=muted?'ミュート中':'ふれると音が出ます';$('#soundDot').classList.toggle('on',!muted);});
+$('#volume').addEventListener('input',e=>{if(Number(e.target.value)===0)humming.cancel();audio.setVolume(Number(e.target.value)/100);wakeSound();$('#volumeValue').value=`${e.target.value}%`;});audio.setVolume(.45);
+$('#stop').addEventListener('click',()=>{humming.cancel();++playEpoch;audio.stopAll();$('#soundState').textContent='音を止めました';});
 window.addEventListener('keydown',e=>{if(e.repeat||e.ctrlKey||e.metaKey||e.altKey||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;const i=Number(e.key)-1;if(i>=0&&i<6&&Number.isInteger(i)){e.preventDefault();keys.add(e.key);play(i);}});
 window.addEventListener('keyup',e=>{keys.delete(e.key)});
-function reset(){freeMode.pause();cancelAnimationFrame(meterFrame);meterFrame=0;scene.classList.remove('happy');sounding=false;quietSince=null;flutterEnvelope=0;flutterPeak=0;flutterVoice=null;setFlutterAmount(0);scene.dataset.audible='false';++playEpoch;armPointer=null;setArmBend(0,true);for(const p of pointers.values())clearTimeout(p.onsetTimer);pointers.clear();palmPointers.clear();keys.clear();audio.setDamped(false);scene.classList.remove('palm-down');scene.dataset.damped='false';audio.stopAll();}
-window.addEventListener('blur',reset);window.addEventListener('pagehide',reset);document.addEventListener('visibilitychange',()=>{if(document.hidden)reset();});
+function reset(){humming.cancel();cancelAnimationFrame(meterFrame);meterFrame=0;scene.classList.remove('happy');sounding=false;quietSince=null;flutterEnvelope=0;flutterPeak=0;flutterVoice=null;setFlutterAmount(0);scene.dataset.audible='false';++playEpoch;armPointer=null;setArmBend(0,true);for(const p of pointers.values())clearTimeout(p.onsetTimer);pointers.clear();palmPointers.clear();keys.clear();audio.setDamped(false);scene.classList.remove('palm-down');scene.dataset.damped='false';audio.stopAll();}
+window.addEventListener('blur',()=>{if(hummingState!=='requesting')reset();});window.addEventListener('pagehide',reset);document.addEventListener('visibilitychange',()=>{if(document.hidden)reset();});
 
 // Effects use one persistent audio graph; UI buttons are siblings of the SVG,
 // so tapping a control never enters the instrument pointer handlers.
