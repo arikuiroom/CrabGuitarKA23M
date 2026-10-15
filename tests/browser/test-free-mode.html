@@ -2,7 +2,7 @@
 <title>Free mode UI regression</title>
 <style>body{font:14px system-ui;margin:12px}button{min-height:44px}iframe{display:block;width:390px;height:844px;border:0}pre{white-space:pre-wrap}</style>
 <button id="run">Run free mode checks</button><pre id="result">Ready. Keep this tab foregrounded. This checks real Web Audio and synthetic input; physical phone audio/multitouch still need device testing.</pre>
-<iframe id="app" src="../../dist/index.html"></iframe>
+<iframe id="app" src="../../dist/index.html?v=25"></iframe>
 <script type="module">
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 run.onclick=async()=>{
@@ -20,7 +20,7 @@ run.onclick=async()=>{
   const script=d.createElement('script');script.type='module';script.textContent=`import{GuitarAudio}from'./audio.js?v=23';window.freeProbe={notes:[],hits:[]};const hit=GuitarAudio.prototype.playPercussion;GuitarAudio.prototype.playPercussion=function(kind,level){const ok=hit.call(this,kind,level);if(ok)window.freeProbe.hits.push({kind,level,time:performance.now()});return ok};const pluck=GuitarAudio.prototype.pluck;GuitarAudio.prototype.pluck=function(f,v,i,...rest){window.freeProbe.audio=this;window.freeProbe.notes.push({f,v,i,gate:rest[0],preset:this.preset,time:performance.now()});return pluck.call(this,f,v,i,...rest)};`;d.body.append(script);await sleep(80);
   await start();button.click();await staysOff();
   for(let i=0;i<20;i++){button.click();button.click()}await staysOff();
-  const keepsPlaying=async(action,label)=>{await start();const before=count(),hits=w.freeProbe.hits.length;action();assert(on(),label+' retains ON');assert(await until(()=>count()>before+1&&w.freeProbe.hits.length>hits,4500),label+' allows following auto notes and rhythm');button.click();await staysOff()};
+  const keepsPlaying=async(action,label)=>{await start();const before=count(),hits=w.freeProbe.hits.length;action();assert(on(),label+' retains ON');assert(await until(()=>count()>before+1&&w.freeProbe.hits.length>hits,6500),label+' allows following auto notes and rhythm');button.click();await staysOff()};
   await keepsPlaying(()=>$('#stringboard').children[w.freeProbe.notes.at(-1).i].click(),'Manual same string');
   await keepsPlaying(()=>$('#stringboard').children[(w.freeProbe.notes.at(-1).i+1)%6].click(),'Manual other string');
   await keepsPlaying(()=>w.dispatchEvent(new w.KeyboardEvent('keydown',{key:'2',bubbles:true})),'Keyboard');
@@ -31,12 +31,12 @@ run.onclick=async()=>{
   for(const [label,x,y] of [['Claw',422,452],['Arm',974,845]]){
     await start();pointer('pointerdown',x,y);const before=count(),hits=w.freeProbe.hits.length;await sleep(800);
     assert(on()&&count()===before&&w.freeProbe.hits.length===hits&&w.freeProbe.audio.percussionVoices.size===0,label+' holds both instruments silent without turning OFF');pointer('pointerup',x,y);
-    assert(await until(()=>count()>before,3300),label+' release resumes on clock');button.click();await staysOff();
+    assert(await until(()=>count()>before,6500),label+' release resumes on clock');button.click();await staysOff();
   }
   await start();$('#mute').click();let before=count(),hits=w.freeProbe.hits.length;await sleep(800);assert(on()&&count()===before&&w.freeProbe.hits.length===hits&&w.freeProbe.audio.percussionVoices.size===0,'Mute retains ON with both instruments silent');$('#mute').click();
-  assert(await until(()=>count()>before,3300),'Unmute resumes');button.click();await staysOff();
+  assert(await until(()=>count()>before,6500),'Unmute resumes');button.click();await staysOff();
   await start();$('#volume').value='0';$('#volume').dispatchEvent(new w.Event('input'));before=count();hits=w.freeProbe.hits.length;await sleep(800);assert(on()&&count()===before&&w.freeProbe.hits.length===hits&&w.freeProbe.audio.percussionVoices.size===0,'Zero volume retains ON with rhythm silent');
-  $('#volume').value='45';$('#volume').dispatchEvent(new w.Event('input'));assert(await until(()=>count()>before,3300),'Volume restore resumes');button.click();await staysOff();
+  $('#volume').value='45';$('#volume').dispatchEvent(new w.Event('input'));assert(await until(()=>count()>before,6500),'Volume restore resumes');button.click();await staysOff();
   const checkPause=async(action,label)=>{await start();action();before=count();hits=w.freeProbe.hits.length;await sleep(700);
     assert(on()&&scene.dataset.freePaused==='true'&&button.textContent.includes('再開'),label+' retains ON and shows resume');
     assert(count()===before&&w.freeProbe.hits.length===hits&&w.freeProbe.audio.percussionVoices.size===0,label+' produces no new notes or rhythm');await start();assert(scene.dataset.freePaused==='false',label+' explicitly resumes');button.click();await staysOff()};
@@ -48,23 +48,23 @@ run.onclick=async()=>{
   assert(scene.dataset.preset==='mint'&&on(),'Preset changes keep selected sound and free mode');
   button.click();await staysOff();
   assert(await until(()=>w.freeProbe.audio.liveVoices.size===0,4000),'OFF drains live voices');
-  const signatures=[];
+  const melodies=[];
   for(const preset of ['red','mint','black','darkbrown','redbrown']){
     $('[data-chord="G"]').click();$('[data-preset="'+preset+'"]').click();const mark=w.freeProbe.notes.length;
-    await start();assert(await until(()=>w.freeProbe.notes.length-mark>=(preset==='mint'?6:5),6000),preset+' produces phrase');
+    await start();assert(await until(()=>w.freeProbe.notes.slice(mark).filter(n=>n.i===5).length>=6,6000),preset+' produces phrase');
     const phrase=w.freeProbe.notes.slice(mark);assert(phrase.every(n=>n.preset===preset),preset+' stays selected');
-    signatures.push(phrase.slice(0,5).map(n=>n.i).join(','));
-    if(preset==='mint')assert(phrase.some(n=>n.gate===.12)&&phrase.some(n=>n.gate===undefined),'Funk mixes clipped hits with natural tails');
-    if(preset==='redbrown')assert(phrase.every(n=>n.gate===undefined),'Bossa keeps natural tails');
-    if(preset==='black')assert(phrase.every(n=>[0,2].includes(n.i)),'G power riff contains only low G and D');
+    const lead=phrase.filter(n=>n.i===5);const pitches=lead.slice(0,6).map(n=>Math.round(69+12*Math.log2(n.f/440)));melodies.push(pitches.join(','));assert(pitches.join(',')==='62,62,62,62,55,54',preset+' preserves the estimated A hook transposed to G');
+    if(preset==='mint')assert(phrase.some(n=>n.gate!==undefined),'Funk retains articulated short hits');
+    if(preset==='redbrown')assert(phrase.every(n=>n.gate===undefined||n.gate>.17),'Bossa keeps sung lengths instead of clipped funk attacks');
+    if(preset==='black')assert(phrase.filter(n=>n.i!==5).every(n=>[0,2].includes(n.i)),'G power support contains only low G and D');
     button.click();await staysOff();
   }
-  assert(new Set(signatures).size===5,'Five colors produce distinct phrases');
+  assert(new Set(melodies).size===1,'Five colors retain the same recognizable source hook');
   const audio=w.freeProbe.audio,unlock=audio.unlock;let release;
   audio.unlock=()=>new Promise(resolve=>release=resolve);
   button.click();assert(on(),'Pending unlock shows cancellable ON');button.click();release();await staysOff();
   audio.unlock=unlock;
   result.textContent=JSON.stringify({passed:true,checks,rhythmHits:w.freeProbe.hits.length,percussionVoices:w.freeProbe.audio.percussionVoices.size},null,2);
- }catch(e){result.textContent=JSON.stringify({passed:false,error:String(e),checks},null,2)}finally{run.disabled=false}
+ }catch(e){result.textContent=JSON.stringify({passed:false,error:String(e),checks,notes:app.contentWindow.freeProbe?.notes.slice(-24),state:app.contentWindow.document.querySelector('.scene').dataset},null,2)}finally{run.disabled=false}
 };
 </script>

@@ -1,127 +1,122 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createFreeMode, freeStrings, rhythmAt } from '../../src/free-mode.js';
+import { freeStrings, melodyMidi, rhythmAt, sourceMotifs } from '../../src/free-mode.js';
+import { fixture, beats, chords, close, midiOf } from './fixture.mjs';
 
-const intervals = { red: 130, mint: 110, black: 95, darkbrown: 155, redbrown: 135 };
-const presets = Object.keys(intervals);
-const chords = {
-  open: [0, 0, 0, 0, 0, 0], C: [null, 3, 2, 0, 1, 0],
-  G: [3, 2, 0, 0, 0, 3], Am: [null, 0, 2, 2, 1, 0], Em: [0, 2, 2, 0, 0, 0]
+const expected = {
+  A: [[67,.135,.174],[67,.530,.313],[67,.948,.662],[67,1.691,.197],[60,1.993,.151],[59,2.329,.256],[60,2.701,.139],[62,2.875,.186],[60,3.061,.406]],
+  B: [[60,.158,.174],[60,.564,.267],[60,.959,.639],[62,1.992,.314],[60,2.341,.348],[59,2.689,.383],[60,3.072,.674]]
 };
-async function record(preset, { ticks = 512, strings = [0, 1, 2, 3], random = () => .5 } = {}) {
-  let time = 0, id = 0;
-  const timers = new Map(), notes = [], hits = [];
-  const tickAt = () => (time - 160) / intervals[preset];
-  const mode = createFreeMode({
-    unlock: async () => {}, canPlay: () => true, getPreset: () => preset, getStrings: () => strings,
-    random, now: () => time,
-    play: (position, velocity, gate) => notes.push({ tick: tickAt(), position, velocity, gate }),
-    percussion: (kind, level) => hits.push({ tick: tickAt(), kind, level }),
-    setTimer: (fn, delay) => { timers.set(++id, { fn, at: time + delay }); return id; },
-    clearTimer: id => timers.delete(id)
-  });
-  await mode.start();
-  for (let tick = 0; tick < ticks; tick++) {
-    assert.equal(timers.size, 1, `${preset}: one shared clock`);
-    const [id, timer] = timers.entries().next().value;
-    timers.delete(id); time = timer.at; timer.fn();
-  }
-  const nextTime = timers.values().next().value.at;
-  mode.stop(); assert.equal(timers.size, 0);
-  return { notes, hits, nextTime };
-}
-function section(notes, start, length = 16) {
-  return notes.filter(n => n.tick >= start && n.tick < start + length)
-    .map(n => ({ ...n, tick: n.tick - start }));
-}
 
-for (const preset of presets) {
-  test(`${preset}: four-bar A A A′ B hook repeats, with a small fourth-cycle answer variation`, async () => {
-    const { notes } = await record(preset);
-    const base = section(notes, 0, 64), variation = section(notes, 192, 64);
-    assert.deepEqual(section(notes, 0), section(notes, 16), 'A repeats exactly');
-    assert.notDeepEqual(section(notes, 0), section(notes, 32), 'A′ is a recognizable turn');
-    assert.deepEqual(section(notes, 0, 8), section(notes, 32, 8), 'A′ preserves the opening half');
-    assert.notDeepEqual(section(notes, 32), section(notes, 48), 'B answers the turn');
-    for (const cycle of [1, 2, 4, 5, 6]) {
-      assert.deepEqual(section(notes, cycle * 64, 64), base, `cycle ${cycle + 1} repeats the hook`);
-    }
-    assert.notDeepEqual(variation, base, 'the fourth cycle has a deliberate variation');
-    assert.deepEqual(section(notes, 192, 48), section(notes, 0, 48), 'variation only changes B');
-    assert.deepEqual(section(notes, 448, 64), variation, 'the variation is deterministic every four cycles');
-    const answer = section(notes, 48), changedAnswer = section(notes, 240);
-    assert(Math.abs(answer.length - changedAnswer.length) <= 2, 'answer changes only a few notes');
-    assert.equal(answer.at(-1).position, 0, 'the answer resolves to the lowest chord tone');
-    assert.equal(changedAnswer.at(-1).position, 0, 'the varied answer keeps its cadence');
-  });
-  test(`${preset}: integer grid, aligned bars, breathing space and natural final notes`, async () => {
-    const { notes, hits, nextTime } = await record(preset);
-    assert.equal(nextTime, 160 + 512 * intervals[preset], 'no drift across eight four-bar cycles');
-    assert(notes.every(n => Number.isInteger(n.tick) && Number.isInteger(n.position) && n.position >= 0 && n.position <= 3));
-    for (let bar = 0; bar < 32; bar++) {
-      const phrase = section(notes, bar * 16);
-      assert.equal(phrase[0].tick, 0, `bar ${bar + 1} begins on its downbeat`);
-      assert(phrase.every(n => n.tick < 14), 'the final two ticks are an explicit rest');
-      assert.equal(phrase.at(-1).gate, undefined, 'final note decays naturally into the rest');
-    }
-    const expectedHits = Array.from({ length: 512 }, (_, tick) => rhythmAt(preset, tick)
-      .map(([kind, level]) => ({ tick, kind, level }))).flat();
-    assert.deepEqual(hits, expectedHits, 'backing beat stays on the same uninterrupted sixteenth grid');
-    // Red/classical backing taps intentionally coincide with their straight
-    // melody. The syncopated colors also put backing hits in guitar gaps.
-    if (['mint', 'black', 'redbrown'].includes(preset)) {
-      assert(hits.some(hit => !notes.some(note => note.tick === hit.tick)), 'backing continues in guitar rests');
-    }
-    if (preset === 'mint' || preset === 'black') {
-      assert(notes.some(n => n.gate === (preset === 'mint' ? .12 : .17)), 'short notes keep rhythmic articulation');
-    } else assert(notes.every(n => n.gate === undefined));
-  });
-}
-
-test('all five hooks have distinct signatures and rhythms, with mostly neighboring pitch steps', async () => {
-  const pitches = new Set(), rhythms = new Set();
-  for (const preset of presets) {
-    const { notes } = await record(preset, { ticks: 256 });
-    pitches.add(notes.slice(0, 5).map(n => n.position).join(','));
-    rhythms.add(notes.map(n => n.tick).join(','));
-    assert(notes.filter(n => n.tick * intervals[preset] < 6000).length >= 5);
-    const jumps = notes.slice(1).map((n, i) => Math.abs(n.position - notes[i].position));
-    if (preset === 'black') assert(notes.every(n => n.position === 0 || n.position === 3));
-    else {
-      assert(Math.max(...jumps) <= 2, `${preset}: no full-palette leap`);
-      assert(jumps.filter(jump => jump <= 1).length / jumps.length > .95, `${preset}: almost all notes move by one step or repeat`);
-    }
-    assert(notes.every((n, i) => !i || (n.tick - notes[i - 1].tick) * intervals[preset] < 3300));
+test('only exact estimated note, onset and duration data define A/B', () => {
+  assert.deepEqual(sourceMotifs, expected);
+  assert(Object.isFrozen(sourceMotifs));
+  for (const motif of Object.values(sourceMotifs)) {
+    assert(Object.isFrozen(motif)); assert(motif.every(Object.isFrozen));
   }
-  assert.equal(pitches.size, 5); assert.equal(rhythms.size, 5);
+  assert.deepEqual(sourceMotifs.A.map(n => n[0]), [67,67,67,67,60,59,60,62,60]);
+  assert.deepEqual(sourceMotifs.B.map(n => n[0]), [60,60,60,62,60,59,60]);
 });
 
-test('every repeated and varied note stays in the selected chord; black stays on its lowest root/fifth', async () => {
-  const openMidi = [40, 45, 50, 55, 59, 64];
-  const chordTones = { open: [4, 7, 11], C: [0, 4, 7], G: [7, 11, 2], Am: [9, 0, 4], Em: [4, 7, 11] };
-  const powerStrings = { open: [0, 4], C: [1, 3], G: [0, 2], Am: [1, 2], Em: [0, 1] };
-  for (const [chord, frets] of Object.entries(chords)) for (const preset of presets) {
-    const strings = freeStrings(chord, frets, preset);
-    const { notes } = await record(preset, { ticks: 256, strings });
-    assert(notes.every(n => strings.includes(n.position)), `${chord}/${preset}: only playable strings`);
-    assert(notes.every(n => chordTones[chord].includes((openMidi[n.position] + frets[n.position]) % 12)), `${chord}/${preset}: every pitch belongs to the chord`);
+for (const [preset, beat] of Object.entries(beats)) {
+  test(`${preset}: exact C melody and unquantized onset ratios repeat A/B on one treble string`, async () => {
+    const f = fixture(); f.setPreset(preset); await f.mode.start();
+    const phraseMs = 16 * beat;
+    f.until(160 + phraseMs * 6);
+    assert.equal(f.leads.length, 48); close(f.due, 160 + phraseMs * 6);
+    let offset = 0;
+    for (let phrase = 0; phrase < 6; phrase++) {
+      const motif = expected[phrase % 2 ? 'B' : 'A'];
+      for (const [midi, onset] of motif) {
+        const note = f.leads[offset++];
+        assert.equal(midiOf(note.frequency), midi); assert.equal(note.i, 5);
+        close(note.time, 160 + phrase * phraseMs + onset / 6.2 * phraseMs);
+        const tick = (note.time - 160) / (beat / 4);
+        assert(Math.abs(tick - Math.round(tick)) > .001, 'melody was not rounded to the drum grid');
+      }
+    }
+    assert(f.leads[0].time < 1800);
+    f.mode.stop(); assert.equal(f.timers.size, 0);
+  });
+
+  test(`${preset}: percussion stays on its uninterrupted sixteenth grid throughout long phrase rests`, async () => {
+    const f = fixture(); f.setPreset(preset); await f.mode.start();
+    f.until(160 + beat * 32 * 3);
+    const expectedHits = Array.from({ length: 128 * 3 }, (_, tick) => rhythmAt(preset, tick)
+      .map(([kind, level]) => ({ kind, level, time: 160 + tick * beat / 4 }))).flat();
+    assert.deepEqual(f.hits, expectedHits);
+    assert(f.hits.some(hit => hit.time > 160 + 10 * beat && hit.time < 160 + 16 * beat), 'backing continues through the A tail');
+    assert(f.hits.some(hit => hit.time > 160 + 26 * beat && hit.time < 160 + 32 * beat), 'backing continues through the B tail');
+    assert(f.hits.every(hit => !f.leads.some(note => Math.abs(note.time - hit.time) < .001)));
+    f.mode.stop();
+  });
+
+  test(`${preset}: sung durations are scaled, short dry attacks are styled, final notes have natural tails`, async () => {
+    const f = fixture(); f.setPreset(preset); await f.mode.start();
+    f.until(160 + beat * 32);
+    const dry = preset === 'mint' ? .12 : preset === 'black' ? .17 : undefined;
+    let offset = 0;
+    for (const motif of Object.values(expected)) for (let i = 0; i < motif.length; i++) {
+      const note = f.leads[offset++], duration = motif[i][2];
+      if (i === motif.length - 1) assert.equal(note.gate, undefined, 'final note rings through the rest');
+      else {
+        const seconds = duration / 6.2 * 16 * beat / 1000;
+        close(note.gate, dry && duration < 6.2 / 16 ? Math.min(dry, seconds) : seconds);
+      }
+    }
+    assert(f.leads[2].gate > .6, 'long held note is not clipped to a short attack');
+    const gap = f.leads[9].time - f.leads[8].time;
+    close(gap, 3.297 / 6.2 * 16 * beat);
+    assert(gap > 3000 && gap < 5300);
+    f.mode.stop();
+  });
+}
+
+test('G preserves major contour; Am and Em/open use the natural-minor seventh', () => {
+  assert.deepEqual([67,60,59,60,62].map(n => melodyMidi(n, 'C')), [67,60,59,60,62]);
+  assert.deepEqual([67,60,59,60,62].map(n => melodyMidi(n, 'G')), [62,55,54,55,57]);
+  assert.deepEqual([67,60,59,60,62].map(n => melodyMidi(n, 'Am')), [64,57,55,57,59]);
+  for (const chord of ['Em','open']) assert.deepEqual([67,60,59,60,62].map(n => melodyMidi(n, chord)), [71,64,62,64,66]);
+  assert.equal(melodyMidi(67), 67); assert.equal(melodyMidi(67, 'unknown'), 67);
+});
+
+test('all styles keep the same melody; black lead includes passing tones and low support stays root/fifth only', async () => {
+  const openMidi = [40,45,50,55,59,64], roots = { open:4, C:0, G:7, Am:9, Em:4 };
+  for (const [chord, frets] of Object.entries(chords)) for (const [preset, beat] of Object.entries(beats)) {
+    const f = fixture(); f.setChord(chord); f.setPreset(preset); await f.mode.start();
+    f.until(160 + beat * 32);
+    const expectedMidi = Object.values(expected).flat().map(note => melodyMidi(note[0], chord));
+    assert.deepEqual(f.leads.map(n => midiOf(n.frequency)), expectedMidi);
+    assert(f.leads.every(n => n.i === freeStrings(chord, frets, 'red').at(-1)));
     if (preset === 'black') {
-      assert.deepEqual(strings, powerStrings[chord]);
-      assert(notes.every(n => powerStrings[chord].includes(n.position)));
-      assert(notes.some(n => n.position === powerStrings[chord][1]), 'riff includes its fifth');
-      assert.equal(notes.at(-1).position, powerStrings[chord][0], 'varied riff cadences on its low root');
-    }
+      const support = freeStrings(chord, frets, 'black');
+      assert.deepEqual(f.support.map(n => n.i), [support[0], support[1], support[0], support[1]]);
+      assert(f.support.every(n => n.i !== 5 && n.gate === .17 && n.v < .4));
+      assert(f.support.every(n => [roots[chord], (roots[chord] + 7) % 12].includes((openMidi[n.i] + frets[n.i]) % 12)));
+      assert(f.leads.some(n => ![roots[chord], (roots[chord] + 7) % 12].includes(midiOf(n.frequency) % 12)), 'the melody is not restricted to power-chord tones');
+    } else assert.equal(f.support.length, 0);
+    f.mode.stop();
   }
 });
 
-test('random touch never changes pitches, rests, gates or variation timing', async () => {
-  for (const preset of presets) {
-    const soft = await record(preset, { ticks: 256, random: () => 0 });
-    const loud = await record(preset, { ticks: 256, random: () => 1 });
-    const withoutVelocity = ({ velocity, ...note }) => note;
+test('support is optional and never collides with the monophonic melody string', async () => {
+  for (const support of [[], [5], [0,5]]) {
+    const f = fixture({ getSupportStrings: () => support }); f.setPreset('black');
+    await f.mode.start(); f.until(160 + beats.black * 32);
+    assert(f.support.every(n => n.i !== 5)); assert.equal(f.leads.length, 16);
+    if (support.length < 2) assert.equal(f.support.length, 0);
+    f.mode.stop();
+  }
+});
+
+test('random touch changes only velocity, never contour, rest, gates or accompaniment timing', async () => {
+  for (const [preset, beat] of Object.entries(beats)) {
+    const soft = fixture({ random: () => 0 }), loud = fixture({ random: () => 1 });
+    for (const f of [soft, loud]) { f.setPreset(preset); await f.mode.start(); f.until(160 + beat * 32); f.mode.stop(); }
+    const withoutVelocity = ({ v, ...note }) => note;
     assert.deepEqual(soft.notes.map(withoutVelocity), loud.notes.map(withoutVelocity));
     assert.deepEqual(soft.hits, loud.hits);
-    assert(soft.notes.every((note, i) => Math.abs(loud.notes[i].velocity - note.velocity - .02) < 1e-9));
-    assert([...soft.notes, ...loud.notes].every(n => n.velocity > 0 && n.velocity < .65));
+    soft.leads.forEach((note, i) => close(loud.leads[i].v - note.v, .02));
+    assert([...soft.notes, ...loud.notes].every(n => n.v > 0 && n.v < .65));
   }
 });

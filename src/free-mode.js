@@ -5,50 +5,42 @@ export function freeStrings(chord, frets, preset = 'red') {
   // Unfretted E/G/B/E form E minor; omit the open A and D strings.
   const strings = chord === 'open' ? [0, 3, 4, 5] : frets.flatMap((f, i) => f === null ? [] : [i]);
   if (preset !== 'black') return strings;
-  // The lowest available root and fifth only: never a third in a power riff.
-  // Read actual fretted pitches, not fixed string numbers (C/G/Am differ).
+  // Support uses the lowest available root and fifth, never fixed string
+  // numbers. The single-note melody has its own, unrestricted pitch contour.
   const root = roots[chord];
   return [root, (root + 7) % 12].map(pc => strings.find(i => (openMidi[i] + frets[i]) % 12 === pc))
     .filter(i => i !== undefined);
 }
-// Original four-bar hooks: A, A, A′, B. Entries are [position in the
-// available chord pitches, sixteenth-note ticks, accent]; null means a rest.
-// Small neighboring steps keep the tune singable. Black uses the two ends
-// of its root/fifth-only palette. Every fourth cycle has one small answer
-// variation; the hook and its bar boundaries stay recognizable throughout.
-const scores = {
-  red: { beat: 520, velocity: .47,
-    call: [[1,4,0],[1,4,0],[2,4,.02],[1,2,-.01],[null,2,0]],
-    turn: [[1,4,0],[1,4,0],[2,4,.02],[3,2,.03],[null,2,0]],
-    answer: [[2,4,.01],[1,4,0],[0,6,-.02],[null,2,0]],
-    variation: [[2,2,.01],[1,2,-.01],[1,4,0],[0,6,-.02],[null,2,0]]
-  },
-  mint: { beat: 440, velocity: .49, gate: .12,
-    call: [[0,2,.04],[null,1,0],[1,1,-.03],[0,2,.02],[null,2,0],[1,2,.01],[2,1,-.04],[1,3,.02],[null,2,0]],
-    turn: [[0,2,.04],[null,1,0],[1,1,-.03],[0,2,.02],[null,2,0],[1,2,.01],[2,1,-.04],[1,1,-.02],[0,2,.03],[null,2,0]],
-    answer: [[0,2,.04],[null,1,0],[1,1,-.03],[2,2,.02],[1,2,-.02],[0,4,.03],[null,4,0]],
-    variation: [[0,2,.04],[null,1,0],[1,1,-.03],[2,2,.02],[1,2,-.02],[0,2,.03],[1,1,-.04],[0,1,.02],[null,4,0]]
-  },
-  black: { beat: 380, velocity: .56, gate: .17,
-    call: [[0,2,.04],[0,2,-.02],[null,2,0],[0,2,.02],[3,4,.01],[0,2,.03],[null,2,0]],
-    turn: [[0,2,.04],[0,2,-.02],[null,2,0],[0,2,.02],[3,2,.01],[3,2,-.02],[0,2,.03],[null,2,0]],
-    answer: [[3,4,.02],[0,4,.03],[0,6,.04],[null,2,0]],
-    variation: [[3,2,.02],[3,2,-.02],[0,4,.03],[0,6,.04],[null,2,0]]
-  },
-  darkbrown: { beat: 620, velocity: .45,
-    call: [[0,2,.02],[1,2,-.02],[2,2,-.03],[3,2,.02],[2,2,-.02],[1,2,-.03],[0,2,.01],[null,2,0]],
-    turn: [[0,2,.02],[1,2,-.02],[2,2,-.03],[3,2,.02],[2,2,-.02],[1,2,-.03],[2,2,.01],[null,2,0]],
-    answer: [[3,2,.02],[2,2,-.02],[1,2,-.03],[2,2,0],[1,2,-.02],[0,4,.02],[null,2,0]],
-    variation: [[3,2,.02],[2,2,-.02],[1,2,-.03],[2,2,0],[1,2,-.02],[0,2,0],[0,2,.02],[null,2,0]]
-  },
-  redbrown: { beat: 540, velocity: .46,
-    call: [[0,3,.03],[1,3,-.03],[2,2,0],[1,3,-.02],[0,3,.02],[null,2,0]],
-    turn: [[0,3,.03],[1,3,-.03],[2,2,0],[3,3,.01],[2,3,-.02],[null,2,0]],
-    answer: [[1,3,-.02],[2,3,0],[1,2,-.03],[0,6,.03],[null,2,0]],
-    variation: [[1,3,-.02],[2,3,0],[1,2,-.03],[0,3,.03],[1,1,-.03],[0,2,.01],[null,2,0]]
-  }
+// Estimated A/B notes only: [MIDI, onset seconds, duration seconds]. Each
+// 6.2-second phrase spans 16 beats; preserve its unquantized timing ratios.
+export const sourceMotifs = Object.freeze({
+  A: Object.freeze([
+    [67, .135, .174], [67, .530, .313], [67, .948, .662],
+    [67, 1.691, .197], [60, 1.993, .151], [59, 2.329, .256],
+    [60, 2.701, .139], [62, 2.875, .186], [60, 3.061, .406]
+  ].map(Object.freeze)),
+  B: Object.freeze([
+    [60, .158, .174], [60, .564, .267], [60, .959, .639],
+    [62, 1.992, .314], [60, 2.341, .348], [59, 2.689, .383],
+    [60, 3.072, .674]
+  ].map(Object.freeze))
+});
+const sourceSeconds = 6.2, phraseBeats = 16;
+const styles = {
+  red: { beat: 520, velocity: .47 },
+  mint: { beat: 440, velocity: .49, dryGate: .12 },
+  black: { beat: 380, velocity: .56, dryGate: .17 },
+  darkbrown: { beat: 620, velocity: .45 },
+  redbrown: { beat: 540, velocity: .46 }
 };
-// Every event shares a sixteenth-note grid. Rest durations are musical time.
+// Keep C at the estimated pitches. G/Am use a lower octave displacement
+// for a comfortable register; Em/open use the upper E register. In minor,
+// lower the source B by a semitone before transposing: Am gets G, Em gets D.
+export function melodyMidi(midi, chord = 'C') {
+  const offsets = { C: 0, G: -5, Am: -3, Em: 4, open: 4 };
+  const minor = chord === 'Am' || chord === 'Em' || chord === 'open';
+  return midi + (offsets[chord] ?? 0) - (minor && midi % 12 === 11 ? 1 : 0);
+}
 export function rhythmAt(preset, tick) {
   const t = tick % 16;
   if (preset === 'mint') return [...(t === 0 || t === 7 || t === 10 ? [['kick', .7]] : []),
@@ -59,27 +51,46 @@ export function rhythmAt(preset, tick) {
     ...(t === 0 || t === 6 || t === 10 ? [['tap', .45]] : [])];
   return t === 0 || t === 8 ? [['tap', preset === 'darkbrown' ? .4 : .35]] : [];
 }
-const timelines = Object.fromEntries(Object.entries(scores).map(([id, score]) => {
-  let length = 0; const notes = new Map();
-  for (let cycle = 0; cycle < 4; cycle++) {
-    for (const bar of [score.call, score.call, score.turn, cycle === 3 ? score.variation : score.answer]) {
-      const lastNote = bar.findLastIndex(([position]) => position !== null);
-      for (const [index, [position, ticks, accent]] of bar.entries()) {
-        if (position !== null) {
-          // Short rhythm notes are clipped; each bar's final note keeps its
-          // natural decay across the written rest. Bossa is never hard-gated.
-          const gate = id !== 'redbrown' && ticks < 4 && index !== lastNote ? score.gate : undefined;
-          notes.set(length, { position, accent, gate });
-        }
-        length += ticks;
-      }
-    }
-  }
-  return [id, { notes, length }];
+// Merge arbitrary melody deadlines and the uninterrupted sixteenth grid.
+// A/B repeat every 32 beats; the bounded timeline needs only one timer.
+const timelines = Object.fromEntries(Object.entries(styles).map(([id, style]) => {
+  const phraseMs = style.beat * phraseBeats, scale = phraseMs / sourceSeconds;
+  const events = Array.from({ length: phraseBeats * 8 }, (_, tick) => ({ at: tick * style.beat / 4, tick }));
+  Object.values(sourceMotifs).forEach((notes, phrase) => {
+    notes.forEach(([midi, onset, duration], index) => {
+      const seconds = duration * scale / 1000;
+      // Preserve sung lengths, with drier short attacks for funk/rock. Each
+      // final note is ungated, leaving a long natural tail and breathing space.
+      const gate = index === notes.length - 1 ? undefined
+        : style.dryGate && duration < sourceSeconds / phraseBeats ? Math.min(style.dryGate, seconds) : seconds;
+      events.push({ at: phrase * phraseMs + onset * scale,
+        note: { midi, gate, accent: index === 0 ? .025 : index === notes.length - 1 ? -.015 : 0 } });
+    });
+  });
+  events.sort((a, b) => a.at - b.at);
+  return [id, { events, duration: phraseMs * 2 }];
 }));
-export function createFreeMode({ unlock, play, percussion = () => {}, silence = () => {}, getStrings, getPreset = () => 'red', canPlay, canStart = () => true, onChange = () => {}, onError = () => {},
+// First event strictly after elapsed, in an indefinitely repeating timeline.
+// Binary search skips arbitrarily long stalls without catch-up loops.
+function after(timeline, elapsed) {
+  const cycle = Math.floor(Math.max(0, elapsed) / timeline.duration);
+  const local = elapsed - cycle * timeline.duration;
+  let low = 0, high = timeline.events.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (timeline.events[middle].at <= local + .001) low = middle + 1;
+    else high = middle;
+  }
+  return cycle * timeline.events.length + low;
+}
+function deadline(timeline, index) {
+  return Math.floor(index / timeline.events.length) * timeline.duration
+    + timeline.events[index % timeline.events.length].at;
+}
+export function createFreeMode({ unlock, play, percussion = () => {}, silence = () => {}, getStrings, getChord = () => 'C',
+  getSupportStrings = () => [], getPreset = () => 'red', canPlay, canStart = () => true, onChange = () => {}, onError = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout, random = Math.random, now = () => performance.now() }) {
-  let active = false, paused = false, timer = null, generation = 0, previousPreset = null, origin = 0, nextTick = 0;
+  let active = false, paused = false, timer = null, generation = 0, previousPreset = null, origin = 0, nextEvent = 0;
   function cancel() {
     generation++; if (timer !== null) clearTimer(timer); timer = null; silence();
   }
@@ -91,33 +102,52 @@ export function createFreeMode({ unlock, play, percussion = () => {}, silence = 
     if (!active || paused) return;
     cancel(); paused = true; onChange(true, true);
   }
+  const current = token => active && !paused && token === generation;
   function schedule(token, at) {
     timer = setTimer(() => {
-      if (token !== generation) return;
+      if (!current(token)) return;
       timer = null; tick(token);
     }, Math.max(0, at - now()));
   }
   function tick(token) {
-    if (!active || paused || token !== generation) return;
-    const time = now(), requested = getPreset(), preset = Object.hasOwn(scores, requested) ? requested : 'red';
-    if (preset !== previousPreset) { origin = time; nextTick = 0; previousPreset = preset; silence(); }
-    const score = scores[preset], interval = score.beat / 4;
-    // Absolute deadlines absorb callback cost and lateness. Skip missed grid
-    // points, never issue a catch-up burst or accumulate random timing drift.
-    const index = Math.max(nextTick, Math.floor((time - origin + .001) / interval));
+    if (!current(token)) return;
+    const time = now(), requested = getPreset(), preset = Object.hasOwn(styles, requested) ? requested : 'red';
+    if (preset !== previousPreset) { origin = time; nextEvent = 0; previousPreset = preset; silence(); }
+    const style = styles[preset], timeline = timelines[preset];
+    // Only the latest due event is eligible after a stall. All deadlines are
+    // calculated from the origin, never from callback completion time.
+    const index = Math.max(nextEvent, after(timeline, time - origin) - 1);
+    const at = origin + deadline(timeline, index);
+    if (at > time + .001) { schedule(token, at); return; }
+    const event = timeline.events[index % timeline.events.length];
     if (canPlay()) {
-      const strings = getStrings(preset);
-      if (!strings.length) { stop(); return; }
-      const timeline = timelines[preset], note = timeline.notes.get(index % timeline.length);
-      if (note) {
-        const i = strings[Math.round(note.position / 3 * (strings.length - 1))];
-        play(i, score.velocity + note.accent + (random() - .5) * .02, note.gate);
+      const strings = getStrings('red'), melodyString = strings.at(-1);
+      if (melodyString === undefined) { stop(); return; }
+      if (event.note) {
+        const note = event.note, frequency = 440 * 2 ** ((melodyMidi(note.midi, getChord()) - 69) / 12);
+        // A fixed treble string retains the instrument's same-string mono
+        // release; changing notes never stacks several melodic voices.
+        play(melodyString, style.velocity + note.accent + (random() - .5) * .02, note.gate, frequency);
       }
-      if (!active || paused || token !== generation) return;
-      for (const [kind, level] of rhythmAt(preset, index)) percussion(kind, level);
+      if (!current(token)) return;
+      // Optional low root/fifth support, once per eight beats in rock only.
+      // Never reuse the melody string and never synthesize extra chord tones.
+      if (preset === 'black' && event.tick !== undefined && event.tick % 32 === 0) {
+        const support = getSupportStrings();
+        const i = support[(event.tick / 32) % 2] ?? support[0];
+        if (i !== undefined && i !== melodyString) play(i, .31, .17);
+      }
+      if (!current(token)) return;
+      if (event.tick !== undefined) for (const [kind, level] of rhythmAt(preset, event.tick)) {
+        percussion(kind, level);
+        if (!current(token)) return;
+      }
     } else silence();
-    if (!active || paused || token !== generation) return;
-    nextTick = index + 1; schedule(token, origin + nextTick * interval);
+    if (!current(token)) return;
+    // Callback work can itself cross deadlines. Skip those too, rather than
+    // scheduling a zero-delay burst, while keeping the original phase.
+    nextEvent = Math.max(index + 1, after(timeline, now() - origin));
+    schedule(token, origin + deadline(timeline, nextEvent));
   }
   async function start() {
     if ((active && !paused) || !canStart()) return;
@@ -125,7 +155,7 @@ export function createFreeMode({ unlock, play, percussion = () => {}, silence = 
     const token = ++generation; onChange(true);
     try {
       await unlock();
-      if (!active || paused || token !== generation) return;
+      if (!current(token)) return;
       schedule(token, now() + 160);
     } catch (error) {
       if (token !== generation) return;
