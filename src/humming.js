@@ -1,4 +1,4 @@
-import { detectPitch, createNoteTracker, normalizeMelody } from './humming-pitch.js';
+import { detectPitch, createNoteTracker, normalizeMelody } from './humming-pitch.js?v=h2';
 
 export const HUMMING_MAX_SECONDS = 4;
 const BUSY = new Set(['requesting', 'listening', 'processing', 'playing']);
@@ -18,8 +18,8 @@ const MESSAGES = {
  * Only scalar pitches/note events survive a frame; PCM is overwritten and
  * cleared on every exit. The microphone is never connected to destination.
  *
- * play(midi, seconds, index) plucks the existing guitar. This controller owns
- * duration gates through stopAudio(), so play need not install any timers.
+ * play(midi, seconds, index) plucks the existing guitar. The play callback owns
+ * per-note duration gates; stopAudio is reserved for cancellation and completion.
  * The caller should cancel on mute/arm/palm input and disable manual plucks
  * while requesting/listening/processing/playing.
  */
@@ -121,19 +121,13 @@ export function createHummingMode({
     }
     if (event.start <= elapsed + 0.002) {
       clear('gate'); gateEpoch++;
-      silence();
       const index = playIndex++;
       const duration = Math.max(0.02, event.duration - Math.max(0, elapsed - event.start));
-      const currentGate = gateEpoch;
       try {
         const played = play(event.midi, duration, index);
         if (played === false && token === epoch) { cancel('playback-blocked'); return; }
       } catch (_) { fail('audio-unavailable', token); return; }
       if (token !== epoch || state !== 'playing') return;
-      gateTimer = setTimeoutFn(() => {
-        if (token !== epoch || currentGate !== gateEpoch || state !== 'playing') return;
-        gateTimer = null; silence();
-      }, duration * 1000);
       emit('playing', { events: events.map(item => ({ ...item })), noteCount: events.length,
         noteIndex: index, pitchMidi: event.midi, elapsed, progress: elapsed / (events.at(-1).start + events.at(-1).duration) });
       if (token !== epoch || state !== 'playing') return;

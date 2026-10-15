@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 // These suites temporarily replace global AudioContext; run them in sequence.
+await import('./test-humming-timing.mjs');
 await import('./test-effects.mjs');
 await import('./test-presets.mjs');
 await import('./test-techniques.mjs');

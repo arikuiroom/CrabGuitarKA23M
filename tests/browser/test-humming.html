@@ -52,9 +52,9 @@ function installMocks(GuitarAudio){
   node.disconnect=function(...args){probe.disconnections++;return nativeDisconnect(...args);};
   return node;
  };
- for(const method of ['pluck','pluckHarmonic']){
+ for(const method of ['pluck','pluckHarmonic','pluckTimed']){
   const original=GuitarAudio.prototype[method];
-  GuitarAudio.prototype[method]=function(...args){probe.audio=this;probe.notes.push({method,frequency:args[0],string:args[2],gate:args[3],preset:this.preset,time:performance.now(),liveMic:probe.live()});return original.apply(this,args);};
+  GuitarAudio.prototype[method]=function(...args){probe.audio=this;probe.notes.push({method,frequency:args[0],string:args[2],gate:args[3],preset:this.preset,time:performance.now(),liveMic:probe.live()});const result=original.apply(this,args);const note=probe.notes.at(-1);if(method==='pluckTimed'){const voice=this.stringVoices[args[2]];note.scheduledDelay=voice?voice.start-this.context.currentTime:null;}return result;};
  }
  const percussion=GuitarAudio.prototype.playPercussion;
  GuitarAudio.prototype.playPercussion=function(...args){probe.percussion.push(args);return percussion.apply(this,args);};
@@ -134,6 +134,7 @@ run.onclick=async()=>{
   const echo=probe.notes.slice(beforeCapture),midis=echo.map(note=>Math.round(69+12*Math.log2(note.frequency/440)));
   assert(echo.length>=3&&echo.every(note=>note.string===5),'Echo is a recognizable multi-note single treble-string phrase');
   assert(midis.includes(57)&&midis.includes(60)&&midis.includes(64),'Detected synthetic A3, C4 and E4 pitches survive playback');
+  assert(probe.notes.filter(n=>n.method==='pluckTimed').every(n=>Number.isFinite(n.scheduledDelay)&&n.scheduledDelay<.02),'Actual echo source scheduling has no 84ms choke delay');
   assert(echo.every(note=>note.liveMic===0),'Every echo note occurs after all microphone tracks stopped');
   await quietAfter('Completed phrase does not resume automatically',500);
   // Silence is a visible retry result, never a random fallback tune.

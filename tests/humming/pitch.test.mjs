@@ -75,6 +75,92 @@ test('stable notes preserve rhythm and 80 ms or longer rests', () => {
   near(normalized[1].start, 0.6);
 });
 
+test('four same-note hums retain their 60 ms gaps and unquantized lengths', () => {
+  const tracker = createNoteTracker();
+  const spans = [[0, 13], [16, 30], [33, 45], [48, 65]];
+  for (let frame = 0; frame < 70; frame++) {
+    const sounding = spans.some(([start, end]) => frame >= start && frame < end);
+    tracker.push(sounding ? pitch(64) : silence, 0.013 + frame * 0.02);
+  }
+  const events = tracker.finish(1.413);
+  assert.deepEqual(events.map(event => event.midi), [64, 64, 64, 64]);
+  events.forEach((event, index) => {
+    near(event.start, 0.013 + spans[index][0] * 0.02, 1e-7);
+    near(event.duration, (spans[index][1] - spans[index][0]) * 0.02, 1e-7);
+    if (index) near(event.start - events[index - 1].start - events[index - 1].duration, 0.06, 1e-7);
+  });
+});
+
+test('a deep amplitude valley retriggers a same-pitch hum even while pitch remains voiced', () => {
+  const tracker = createNoteTracker();
+  for (let frame = 0; frame < 55; frame++) {
+    const low = (frame >= 15 && frame < 18) || (frame >= 35 && frame < 38);
+    tracker.push({ ...pitch(62 + 0.15 * Math.sin(frame)), rms: low ? 0.025 : 0.1 }, frame * 0.02);
+  }
+  const events = tracker.finish(1.1);
+  assert.deepEqual(events.map(event => event.midi), [62, 62, 62]);
+  near(events[0].duration, 0.30, 1e-7);
+  near(events[1].start, 0.36, 1e-7);
+  near(events[1].duration, 0.34, 1e-7);
+  near(events[2].start, 0.76, 1e-7);
+});
+
+test('4096-sample rolling PCM frames preserve repeated hums despite window smoothing', () => {
+  const spans = [[0, 0.26], [0.32, 0.60], [0.66, 0.90], [0.96, 1.30]];
+  for (const sampleRate of [44100, 48000, 96000]) {
+    const tracker = createNoteTracker();
+    for (let frame = 0; frame < 75; frame++) {
+      const time = frame * 0.02;
+      const samples = Float32Array.from({ length: 4096 }, (_, index) => {
+        const at = time - (4096 - index) / sampleRate;
+        return spans.some(([start, end]) => at >= start && at < end)
+          ? 0.15 * Math.sin(2 * Math.PI * 220 * at) : 0;
+      });
+      tracker.push(detectPitch(samples, sampleRate), time);
+    }
+    const events = tracker.finish(1.5);
+    assert.deepEqual(events.map(event => event.midi), [57, 57, 57, 57], `${sampleRate} Hz`);
+    events.forEach((event, index) => {
+      // Rolling windows necessarily observe edges late; retain the rhythm
+      // within one 20 ms poll rather than pretending detection is zero-latency.
+      assert(event.start >= spans[index][0]);
+      assert(event.start - spans[index][0] <= 0.06 + 1e-7);
+      near(event.duration, spans[index][1] - spans[index][0], 0.02 + 1e-7);
+      if (index) near(event.start - events[index - 1].start - events[index - 1].duration, 0.06, 1e-7);
+    });
+    const normalized = normalizeMelody(events);
+    normalized.forEach((event, index) => near(event.start, spans[index][0], 0.02 + 1e-7));
+  }
+});
+
+test('brief low frames and confidence-only dropouts never become rearticulations', () => {
+  const tracker = createNoteTracker();
+  for (let frame = 0; frame < 75; frame++) {
+    let result = { ...pitch(69 + 0.25 * Math.sin(frame)), rms: 0.1 + 0.015 * Math.sin(frame / 3) };
+    if (frame === 15 || frame === 30 || frame === 31) result = silence;
+    if (frame >= 45 && frame < 48) result = { ...result, midi: null, frequency: null, confidence: 0.3 };
+    if (frame === 60) result = { ...result, midi: null, frequency: null, rms: NaN };
+    tracker.push(result, frame * 0.02);
+  }
+  const events = tracker.finish(1.5);
+  assert.equal(events.length, 1);
+  near(events[0].duration, 1.5, 1e-7);
+});
+
+test('shallow dips, sustained quieter humming and a one-frame return do not add notes', () => {
+  for (const scenario of ['shallow', 'quiet', 'transient']) {
+    const tracker = createNoteTracker();
+    for (let frame = 0; frame < 65; frame++) {
+      let result = pitch(60);
+      if (scenario === 'shallow' && frame >= 15 && frame < 19) result.rms = 0.07;
+      if (scenario === 'quiet' && frame >= 15 && frame < 40) result.rms = 0.007;
+      if (scenario === 'transient' && frame >= 15 && frame !== 18) result = silence;
+      tracker.push(result, frame * 0.02);
+    }
+    assert.equal(tracker.finish(1.3).length, 1, scenario);
+  }
+});
+
 test('vibrato, semitone boundary jitter, short dropouts and octave glitches do not retrigger', () => {
   const tracker = createNoteTracker();
   for (let frame = 0; frame <= 70; frame++) {
@@ -119,6 +205,15 @@ test('event count is bounded and finished arrays cannot mutate tracker state', (
   assert(tracker.getState().limitReached);
   events[0].midi = 1;
   assert.notEqual(tracker.finish(20)[0].midi, 1);
+});
+
+test('repeated same-note articulations respect the event cap', () => {
+  const tracker = createNoteTracker({ maxNotes: 2 });
+  for (let frame = 0; frame < 100; frame++) {
+    tracker.push(frame % 16 < 13 ? pitch(64) : silence, frame * 0.02);
+  }
+  assert.equal(tracker.finish(2).length, 2);
+  assert(tracker.getState().limitReached);
 });
 
 test('whole-motif octaves preserve contour, durations and rests, including a wide range', () => {

@@ -508,6 +508,11 @@ export class GuitarAudio {
    * with a short release. Omitting the index preserves the legacy polyphony.
    * The shared room is allowed to decay naturally, like a real acoustic space.
    */
+  // Humming echo keeps captured durations without touching the shared damper.
+  pluckTimed(frequency, velocity, stringIndex, seconds) {
+    return this._pluck(frequency, velocity, false, false, 0, stringIndex, seconds, true);
+  }
+
   pluck(frequency, velocity = 0.7, stringIndex, gate) {
     return this._pluck(frequency, velocity, false, false, 0, stringIndex, gate);
   }
@@ -548,7 +553,7 @@ export class GuitarAudio {
     return true;
   }
 
-  _pluck(frequency, velocity, harmonic, cut = false, scheduledStart = 0, stringIndex, gate) {
+  _pluck(frequency, velocity, harmonic, cut = false, scheduledStart = 0, stringIndex, gate, exactGate = false) {
     if (stringIndex !== undefined && (!Number.isInteger(stringIndex)
       || stringIndex < 0 || stringIndex >= STRING_COUNT)) return false;
     if (!Number.isFinite(frequency) || frequency < 20 || frequency > 6000) return false;
@@ -565,12 +570,13 @@ export class GuitarAudio {
     const shortHarmonic = harmonic && this.preset === 'darkbrown';
     const dryOnly = cut || shortHarmonic;
     const timbre = this.preset === 'darkbrown' ? 'nylon' : this.preset === 'redbrown' ? 'bossa' : 'steel';
-    const key = `${cut ? 'cut' : shortHarmonic ? 'nylon-touch' : harmonic ? 'harmonic' : 'normal'}:${shortHarmonic ? 'nylon' : harmonic ? 'pinch' : timbre}:${frequency.toFixed(5)}:${context.sampleRate}`;
+    const bufferSeconds = exactGate ? Math.max(3, Math.min(4, gate) + 0.05) : 3;
+    const key = `${bufferSeconds}:${cut ? 'cut' : shortHarmonic ? 'nylon-touch' : harmonic ? 'harmonic' : 'normal'}:${shortHarmonic ? 'nylon' : harmonic ? 'pinch' : timbre}:${frequency.toFixed(5)}:${context.sampleRate}`;
     let buffer = this.cache.get(key);
     if (!buffer) {
       const samples = shortHarmonic ? synthesizeNylonTouch(frequency, context.sampleRate)
         : harmonic ? synthesizeHarmonic(frequency, context.sampleRate, 3)
-        : synthesizeTimbre(frequency, context.sampleRate, cut ? CUT_NOTE_DURATION : 3, timbre);
+        : synthesizeTimbre(frequency, context.sampleRate, cut ? CUT_NOTE_DURATION : bufferSeconds, timbre);
       buffer = context.createBuffer(1, samples.length, context.sampleRate);
       buffer.getChannelData(0).set(samples);
       if (this.cache.size >= 48) this.cache.delete(this.cache.keys().next().value);
@@ -659,7 +665,7 @@ export class GuitarAudio {
     // Auto phrases can clip a note using its existing gain. No new nodes,
     // timers, PCM, or shared-effect changes; manual calls omit this option.
     if (Number.isFinite(gate) && gate > 0) {
-      const end = start + clamp(gate, 0.12, 2);
+      const end = start + (exactGate ? clamp(gate, 0.02, 4) : clamp(gate, 0.12, 2));
       this._ramp(gain.gain, 0, end, 0.02, true);
       voice.stopAt = end + 0.021;
       source.stop(voice.stopAt);

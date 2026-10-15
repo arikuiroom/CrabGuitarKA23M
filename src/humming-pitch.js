@@ -84,11 +84,14 @@ export function createNoteTracker(options = {}) {
   const events = [];
   let active = null, candidate = null, silenceAt = null, lastVoicedAt = null;
   let voiced = false, history = [], lastTime = 0;
+  let rmsLevel = 0, valley = null;
   const close = time => {
     if (active && time - active.start >= minNote - 1e-7 && events.length < maxNotes) {
       events.push({ midi: active.midi, start: active.start, duration: Math.max(minNote, time - active.start) });
     }
     active = null;
+    rmsLevel = 0;
+    valley = null;
   };
   const info = () => ({ noteCount: events.length + (active ? 1 : 0),
     pitchMidi: active?.midi ?? null, lastVoicedAt, hasVoiced: lastVoicedAt !== null,
@@ -100,6 +103,51 @@ export function createNoteTracker(options = {}) {
       const accepted = result && Number.isFinite(result.midi) && Number.isFinite(result.frequency)
         && result.rms >= (voiced ? 0.006 : 0.010)
         && result.confidence >= (voiced ? 0.80 : 0.86);
+      const rms = Number.isFinite(result?.rms) ? Math.max(0, result.rms) : null;
+      // A confidence dropout alone is not a new hum. Require a deep RMS
+      // valley lasting at least 50 ms and a sustained same-pitch return.
+      // The wider entry threshold accommodates overlapping analyser frames;
+      // only a trough below 60% of the previous level can retrigger.
+      if (valley && time - valley.start > 0.20 && valley.returnAt === null) {
+        valley = null;
+        if (accepted) rmsLevel = rms; // A sustained quieter note is a new level.
+      }
+      if (active && rms !== null && rmsLevel > 0 && time - active.start >= minNote) {
+        if (!valley && rms < rmsLevel * 0.72) {
+          valley = { start: time, end: null, returnAt: null, level: rmsLevel, minimum: rms };
+        }
+        if (valley) {
+          if (rms < valley.level * 0.72) {
+            if (valley.end !== null) {
+              valley.start = time;
+              valley.minimum = rms;
+            }
+            valley.minimum = Math.min(valley.minimum, rms);
+            valley.end = null;
+            valley.returnAt = null;
+          } else {
+            valley.end ??= time;
+            if (valley.end - valley.start < 0.05 - 1e-7 || valley.minimum > valley.level * 0.60) {
+              valley = null;
+            } else if (accepted && rms >= valley.level * 0.90 && Math.abs(result.midi - active.midi) < 0.68) {
+              valley.returnAt ??= time;
+              if (time - valley.returnAt >= 0.04 - 1e-7) {
+                const next = { midi: active.midi, start: valley.end };
+                close(valley.start);
+                if (events.length < maxNotes) active = next;
+                candidate = null;
+                history = [];
+              }
+            } else valley.returnAt = null;
+          }
+        }
+      }
+      if (!valley && accepted) {
+        // Follow rising loudness quickly, but do not let the falling edge of
+        // an overlapping analysis window erase its own valley reference.
+        const weight = rms < rmsLevel ? 0.02 : 0.2;
+        rmsLevel = rmsLevel ? rmsLevel + (rms - rmsLevel) * weight : rms;
+      }
       if (!accepted) {
         if (silenceAt === null) silenceAt = time;
         candidate = null;

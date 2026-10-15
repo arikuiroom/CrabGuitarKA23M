@@ -230,3 +230,15 @@ test('dispose removes lifecycle listeners; reset forgets note events; returned e
   f.mode.dispose(); f.mode.dispose(); assert.equal(f.documentTarget.count(), 0); assert.equal(f.windowTarget.count(), 0);
   assert.equal(await f.mode.start(), false); assert.equal(f.mode.active, false);
 });
+
+
+test('rhythmic echo never invokes whole-output choke between notes',async()=>{
+ const f=fixture({detect:t=>t<.3?reading(60):t<.5?quiet:t<.8?reading(60):t<1?quiet:reading(64)});
+ await f.mode.start();f.until(1400);f.mode.stopListening();
+ const events=f.mode.getEvents(), stops=f.calls.filter(x=>x==='stop').length;
+ assert.equal(events.length,3);
+ f.until(1500+events.at(-1).start*1000+1);
+ assert.equal(f.calls.filter(x=>x==='stop').length,stops,'neither onset nor note end chokes the shared output');
+ assert.deepEqual(f.played.map(x=>x.duration),events.map(x=>x.duration));
+ f.mode.cancel();assert.equal(f.timers.size,0);
+});
