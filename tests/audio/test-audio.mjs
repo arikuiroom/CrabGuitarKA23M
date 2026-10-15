@@ -95,6 +95,18 @@ assert.equal(audio.context.state, 'running');
 assert.equal(audio.readOutputLevel(), 0, 'contexts without an analyser remain supported');
 assert.equal(audio.compressor.ratio.value, 4);
 assert(audio.pluck(110));
+// Optional auto gates share manual PCM and do not affect a replacement voice.
+const gated = new GuitarAudio();await gated.unlock();gated.setPreset('mint');
+gated.pluck(110,.5,1,.12);const autoVoice=gated.stringVoices[1];
+assert(Math.abs(autoVoice.stopAt-autoVoice.start-.141)<1e-9);
+assert.equal(gated._parameterState(autoVoice.gain.gain).events.at(-1).value,0);
+gated.pluck(110,.5,1);const manualVoice=gated.stringVoices[1];
+assert.equal(manualVoice.source.buffer,autoVoice.source.buffer,'auto and manual share identical PCM');
+assert.equal(manualVoice.stopAt,undefined,'manual voice has no automatic gate');
+assert.notEqual(manualVoice,autoVoice);autoVoice.source.onended();
+assert.equal(gated.stringVoices[1],manualVoice,'old auto completion never removes newer manual voice');
+assert(gated._parameterState(manualVoice.gain.gain).events.at(-1).value>0);
+gated.stopAll();
 const firstBuffer = audio.voices[0].source.buffer;
 assert(audio.pluck(110));
 assert.equal(audio.voices[1].source.buffer, firstBuffer, 'repeat notes reuse rendered sample');

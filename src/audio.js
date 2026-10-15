@@ -479,8 +479,8 @@ export class GuitarAudio {
    * with a short release. Omitting the index preserves the legacy polyphony.
    * The shared room is allowed to decay naturally, like a real acoustic space.
    */
-  pluck(frequency, velocity = 0.7, stringIndex) {
-    return this._pluck(frequency, velocity, false, false, 0, stringIndex);
+  pluck(frequency, velocity = 0.7, stringIndex, gate) {
+    return this._pluck(frequency, velocity, false, false, 0, stringIndex, gate);
   }
 
   /** Nylon uses a woody stopped touch; ukulele always plays its ordinary note. */
@@ -519,7 +519,7 @@ export class GuitarAudio {
     return true;
   }
 
-  _pluck(frequency, velocity, harmonic, cut = false, scheduledStart = 0, stringIndex) {
+  _pluck(frequency, velocity, harmonic, cut = false, scheduledStart = 0, stringIndex, gate) {
     if (stringIndex !== undefined && (!Number.isInteger(stringIndex)
       || stringIndex < 0 || stringIndex >= STRING_COUNT)) return false;
     if (!Number.isFinite(frequency) || frequency < 20 || frequency > 6000) return false;
@@ -627,6 +627,14 @@ export class GuitarAudio {
     this.liveVoices.add(voice);
     source.onended = () => this._finishVoice(voice);
     source.start(start);
+    // Auto phrases can clip a note using its existing gain. No new nodes,
+    // timers, PCM, or shared-effect changes; manual calls omit this option.
+    if (Number.isFinite(gate) && gate > 0) {
+      const end = start + clamp(gate, 0.12, 2);
+      this._ramp(gain.gain, 0, end, 0.02, true);
+      voice.stopAt = end + 0.021;
+      source.stop(voice.stopAt);
+    }
     return true;
   }
 

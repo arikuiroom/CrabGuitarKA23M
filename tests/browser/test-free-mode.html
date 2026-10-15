@@ -17,31 +17,52 @@ run.onclick=async()=>{
   assert(!on()&&count()===0,'Initial visit is silent');
   const rect=button.getBoundingClientRect();assert(rect.width>=44&&rect.height>=44,'44px touch target');
   assert(d.documentElement.scrollWidth<=w.innerWidth,'No horizontal document overflow');
-  const script=d.createElement('script');script.type='module';script.textContent=`import{GuitarAudio}from'./audio.js?v=18';window.freeProbe={notes:[]};const pluck=GuitarAudio.prototype.pluck;GuitarAudio.prototype.pluck=function(f,v,i,...rest){window.freeProbe.audio=this;window.freeProbe.notes.push({f,v,i,preset:this.preset});return pluck.call(this,f,v,i,...rest)};`;d.body.append(script);await sleep(80);
+  const script=d.createElement('script');script.type='module';script.textContent=`import{GuitarAudio}from'./audio.js?v=22';window.freeProbe={notes:[]};const pluck=GuitarAudio.prototype.pluck;GuitarAudio.prototype.pluck=function(f,v,i,...rest){window.freeProbe.audio=this;window.freeProbe.notes.push({f,v,i,gate:rest[0],preset:this.preset,time:performance.now()});return pluck.call(this,f,v,i,...rest)};`;d.body.append(script);await sleep(80);
   await start();button.click();await staysOff();
   for(let i=0;i<20;i++){button.click();button.click()}await staysOff();
-  await start();$('#stringboard').children[2].click();await staysOff();
-  await start();w.dispatchEvent(new w.KeyboardEvent('keydown',{key:'2',bubbles:true}));await staysOff();
+  const keepsPlaying=async(action,label)=>{await start();const before=count();action();assert(on(),label+' retains ON');assert(await until(()=>count()>before+1,3300),label+' allows following auto notes');button.click();await staysOff()};
+  await keepsPlaying(()=>$('#stringboard').children[w.freeProbe.notes.at(-1).i].click(),'Manual same string');
+  await keepsPlaying(()=>$('#stringboard').children[(w.freeProbe.notes.at(-1).i+1)%6].click(),'Manual other string');
+  await keepsPlaying(()=>w.dispatchEvent(new w.KeyboardEvent('keydown',{key:'2',bubbles:true})),'Keyboard');
   const svg=$('#instrument');svg.setPointerCapture=()=>{};
   const point=(x,y)=>{const p=svg.createSVGPoint();p.x=x;p.y=y;return p.matrixTransform($('#actualStrings').getScreenCTM())};
-  const touch=async(x,y)=>{const p=point(x,y);svg.dispatchEvent(new w.PointerEvent('pointerdown',{pointerId:71,pointerType:'touch',button:0,bubbles:true,clientX:p.x,clientY:p.y}));svg.dispatchEvent(new w.PointerEvent('pointerup',{pointerId:71,pointerType:'touch',button:0,bubbles:true,clientX:p.x,clientY:p.y}));await staysOff()};
-  await start();await touch(1013,575);
-  await start();await touch(422,452);
-  await start();await touch(974,845);
-  await start();$('#mute').click();await staysOff();button.click();assert(!on(),'Cannot enable while muted');$('#mute').click();
-  await start();$('#volume').value='0';$('#volume').dispatchEvent(new w.Event('input'));await staysOff();button.click();assert(!on(),'Cannot enable at zero volume');$('#volume').value='45';$('#volume').dispatchEvent(new w.Event('input'));
-  for(const event of ['blur','pagehide']){await start();w.dispatchEvent(new w.Event(event));await staysOff()}
-  await start();Object.defineProperty(d,'hidden',{configurable:true,value:true});d.dispatchEvent(new w.Event('visibilitychange'));await staysOff();delete d.hidden;
-  await start();$('#stop').click();await staysOff();
+  const pointer=(type,x,y)=>{const p=point(x,y);svg.dispatchEvent(new w.PointerEvent(type,{pointerId:71,pointerType:'touch',button:0,bubbles:true,clientX:p.x,clientY:p.y}))};
+  await keepsPlaying(()=>{pointer('pointerdown',1013,575);pointer('pointerup',1013,575)},'Touch string');
+  for(const [label,x,y] of [['Claw',422,452],['Arm',974,845]]){
+    await start();pointer('pointerdown',x,y);const before=count();await sleep(800);
+    assert(on()&&count()===before,label+' holds silence without turning OFF');pointer('pointerup',x,y);
+    assert(await until(()=>count()>before,3300),label+' release resumes on clock');button.click();await staysOff();
+  }
+  await start();$('#mute').click();let before=count();await sleep(800);assert(on()&&count()===before,'Mute retains ON silently');$('#mute').click();
+  assert(await until(()=>count()>before,3300),'Unmute resumes');button.click();await staysOff();
+  await start();$('#volume').value='0';$('#volume').dispatchEvent(new w.Event('input'));before=count();await sleep(800);assert(on()&&count()===before,'Zero volume retains ON silently');
+  $('#volume').value='45';$('#volume').dispatchEvent(new w.Event('input'));assert(await until(()=>count()>before,3300),'Volume restore resumes');button.click();await staysOff();
+  const checkPause=async(action,label)=>{await start();action();before=count();await sleep(700);
+    assert(on()&&scene.dataset.freePaused==='true'&&button.textContent.includes('再開'),label+' retains ON and shows resume');
+    assert(count()===before,label+' produces no new notes');await start();assert(scene.dataset.freePaused==='false',label+' explicitly resumes');button.click();await staysOff()};
+  for(const event of ['blur','pagehide'])await checkPause(()=>w.dispatchEvent(new w.Event(event)),event);
+  await checkPause(()=>{Object.defineProperty(d,'hidden',{configurable:true,value:true});d.dispatchEvent(new w.Event('visibilitychange'));delete d.hidden;d.dispatchEvent(new w.Event('visibilitychange'))},'Background/foreground');
+  await checkPause(()=>$('#stop').click(),'Stop');
   await start();$('[data-chord="C"]').click();$('[data-preset="mint"]').click();const mark=w.freeProbe.notes.length;await sleep(2700);
   const notes=w.freeProbe.notes.slice(mark);assert(notes.length>0&&notes.every(n=>n.i!==0),'Current C chord skips muted sixth string');
   assert(scene.dataset.preset==='mint'&&on(),'Preset changes keep selected sound and free mode');
   button.click();await staysOff();
   assert(await until(()=>w.freeProbe.audio.liveVoices.size===0,4000),'OFF drains live voices');
+  const signatures=[];
+  for(const preset of ['red','mint','black','darkbrown','redbrown']){
+    $('[data-chord="G"]').click();$('[data-preset="'+preset+'"]').click();const mark=w.freeProbe.notes.length;
+    await start();assert(await until(()=>w.freeProbe.notes.length-mark>=5,6000),preset+' produces phrase');
+    const phrase=w.freeProbe.notes.slice(mark);assert(phrase.every(n=>n.preset===preset),preset+' stays selected');
+    signatures.push(phrase.slice(0,5).map(n=>n.i).join(','));
+    if(preset==='mint')assert(phrase.every(n=>n.gate===.12),'Funk auto notes use clipped envelope');
+    if(preset==='black')assert(phrase.every(n=>[0,2].includes(n.i)),'G power riff contains only low G and D');
+    button.click();await staysOff();
+  }
+  assert(new Set(signatures).size===5,'Five colors produce distinct phrases');
   const audio=w.freeProbe.audio,unlock=audio.unlock;let release;
   audio.unlock=()=>new Promise(resolve=>release=resolve);
-  button.click();assert(on(),'Pending unlock shows cancellable ON');$('#mute').click();release();await staysOff();
-  audio.unlock=unlock;$('#mute').click();
+  button.click();assert(on(),'Pending unlock shows cancellable ON');button.click();release();await staysOff();
+  audio.unlock=unlock;
   result.textContent=JSON.stringify({passed:true,checks},null,2);
  }catch(e){result.textContent=JSON.stringify({passed:false,error:String(e),checks},null,2)}finally{run.disabled=false}
 };
