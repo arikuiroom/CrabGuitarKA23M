@@ -57,7 +57,6 @@ export const SPRITE_HIT_REGIONS = Object.freeze({
 
 export function mountSpriteParts(svg) {
   const ns = 'http://www.w3.org/2000/svg';
-  const xlink = 'http://www.w3.org/1999/xlink';
   const document = svg.ownerDocument;
   const create = (tag, attributes = {}) => {
     const node = document.createElementNS(ns, tag);
@@ -79,11 +78,10 @@ export function mountSpriteParts(svg) {
     }
     const placement = create('g', { class: 'sprite-placement', transform: `translate(${part.translate.join(' ')})` });
     const image = create('image', {
-      class: 'painted-sprite', href: SPRITE_URLS.red,
+      class: 'painted-sprite',
       width: SPRITE_SHEET.width, height: SPRITE_SHEET.height, preserveAspectRatio: 'xMidYMid meet',
       'clip-path': `url(#${part.clipId})`,
     });
-    image.setAttributeNS(xlink, 'xlink:href', SPRITE_URLS.red);
     if (part.imageId) image.id = part.imageId;
     placement.append(image);
     group.append(placement);
@@ -96,4 +94,98 @@ export function mountSpriteParts(svg) {
   }
   svg.querySelector('#palmLabel').setAttribute('x', String(palm.x));
   svg.querySelector('#palmLabel').setAttribute('y', String(palm.y + 5));
+}
+
+// Only the requested sheet is decoded. In particular, first paint does not race
+// five large PNG decodes on mobile. Keep old artwork until its replacement is ready.
+export function createSpritePainter(svg, {
+  createImage = () => new Image(), loadTimeout = 8000, decodeTimeout = 1200, onState = () => {},
+} = {}) {
+  let revision = 0, cancelPending = null, displayed = null;
+  const xlink = 'http://www.w3.org/1999/xlink';
+  function prepare(url) {
+    let image = createImage(), timer, decodeTimer, settled = false, decoding = false;
+    let rejectPromise;
+    const promise = new Promise((resolve, reject) => {
+      rejectPromise = reject;
+      const finish = error => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer); clearTimeout(decodeTimer);
+        image.onload = image.onerror = null;
+        if (error) reject(error); else resolve(image);
+      };
+      const loaded = () => {
+        if (settled || decoding) return;
+        decoding = true;
+        clearTimeout(timer);
+        if (!image.naturalWidth) { finish(new Error('Empty sprite image')); return; }
+        // Some engines reject decode() for an otherwise loaded PNG. A successful
+        // load is a usable fallback; a hung decode must not keep artwork blank.
+        if (typeof image.decode !== 'function') { finish(); return; }
+        decodeTimer = setTimeout(() => finish(), decodeTimeout);
+        Promise.resolve().then(() => image.decode()).then(() => finish(), () => finish());
+      };
+      image.onload = loaded;
+      image.onerror = () => finish(new Error('Sprite image failed to load'));
+      timer = setTimeout(() => finish(new Error('Sprite image load timed out')), loadTimeout);
+      image.src = url;
+      if (image.complete && image.naturalWidth) loaded();
+    });
+    cancelPending = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer); clearTimeout(decodeTimer);
+      image.onload = image.onerror = null;
+      image.src = '';
+      rejectPromise(new Error('Superseded sprite'));
+    };
+    return promise;
+  }
+  function commit(url, id) {
+    // Replacing just the seven image nodes gives WebKit a fresh paint resource
+    // after decoding; all clipping, transforms and animated groups stay intact.
+    for (const previous of svg.querySelectorAll('.painted-sprite')) {
+      const image = previous.cloneNode(false);
+      image.setAttribute('href', url);
+      image.setAttributeNS(xlink, 'xlink:href', url);
+      previous.replaceWith(image);
+    }
+    displayed = id;
+    svg.dataset.spriteDisplayed = id;
+  }
+  function state(value) {
+    svg.dataset.spriteState = value;
+    svg.setAttribute('aria-busy', String(value === 'loading'));
+    onState(value);
+  }
+  return {
+    async select(id) {
+      if (!SPRITE_URLS[id]) return false;
+      const token = ++revision;
+      cancelPending?.(); cancelPending = null;
+      svg.dataset.spriteRequested = id;
+      if (displayed === id && svg.dataset.spriteState !== 'error') { state('ready'); return true; }
+      state('loading');
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const url = SPRITE_URLS[id] + (attempt ? '&paintRetry=1' : '');
+        try {
+          await prepare(url);
+          if (token !== revision) return false;
+          commit(url, id);
+          state('ready');
+          cancelPending = null;
+          return true;
+        } catch {
+          if (token !== revision) return false;
+        }
+      }
+      // Bounded fallback: let SVG's own image loader try if HTML image loading
+      // failed. Never erase a previously visible color on a network failure.
+      if (!displayed) commit(SPRITE_URLS[id], id);
+      state('error');
+      cancelPending = null;
+      return false;
+    },
+  };
 }

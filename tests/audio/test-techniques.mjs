@@ -11,8 +11,8 @@ assert.deepEqual(GUITAR_PRESETS.black, { id: 'black', name: 'Metal', highpass: 9
   cutoff: 4200, drive: 8, clean: 0, distorted: 0.095, output: 1, dry: 1, wet: 0.016 });
 assert.deepEqual(GUITAR_PRESETS.darkbrown, { id: 'darkbrown', name: 'Nylon', highpass: 28, bass: 2, mids: 1, treble: -3,
   cutoff: 5800, drive: 1, clean: 1, distorted: 0, output: 0.58, dry: 0.97, wet: 0.055 });
-assert.deepEqual(GUITAR_PRESETS.redbrown, { id: 'redbrown', name: 'Ukulele', highpass: 120, bass: -5, mids: 3, treble: 4,
-  cutoff: 9500, drive: 1, clean: 1, distorted: 0, output: 1.32, dry: 1, wet: 0.012 });
+assert.deepEqual(GUITAR_PRESETS.redbrown, { id: 'redbrown', name: 'Bossa Nylon', highpass: 32, bass: 1.5, mids: 1.2, treble: -0.5,
+  cutoff: 6800, drive: 1, clean: 1, distorted: 0, output: 0.66, dry: 0.99, wet: 0.025 });
 const rms = samples => Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
 function spectral(samples, hz, sr, from = 0.045, to = 0.3) {
   const begin = Math.floor(from * sr), end = Math.min(samples.length, Math.floor(to * sr));
@@ -116,7 +116,7 @@ try {
     const priorToneEvents = audio.voices[0].tone.frequency.events.slice();
     const ordinaryBuffer = audio.voices[0].source.buffer, harmonicBuffer = audio.voices[1].source.buffer;
     if (id === 'redbrown') {
-      assert.equal(ordinaryBuffer, harmonicBuffer, 'ukulele harmonic API uses the ordinary note/cache');
+      assert.equal(ordinaryBuffer, harmonicBuffer, 'bossa nylon harmonic API uses the ordinary note/cache');
       assert.equal(audio.voices[1].harmonic, false);
     } else assert.notEqual(ordinaryBuffer, harmonicBuffer, 'other normal/touch cache entries stay separate');
     assert(audio.pluckHarmonic(110)); assert.equal(audio.voices[2].source.buffer, harmonicBuffer);
@@ -164,7 +164,7 @@ try {
   assert.equal(cached.cache.size, 48);
   assert.equal(cached.pluckHarmonic(NaN), false); assert.equal(cached.pluckHarmonic(110, NaN), false);
 } finally { globalThis.AudioContext = oldContext; }
-console.log(`Technique tests passed: mint clean funk/wah, metal/nylon/ukulele presets, unchanged red; 21 harmonic spectra (fourth-partial dominance ≥${minimumDominance.toFixed(2)}×, repitched-pluck difference ≥${minimumRevoiceDifference.toFixed(2)}); 72 ms post-effects fade across all five presets; held-note suppression; silent release; fresh replay; independent mute/volume; Safari fallback; shared 48-buffer cache and 12-voice limit.`);
+console.log(`Technique tests passed: mint clean funk/wah, metal/nylon/bossa presets, unchanged red; 21 harmonic spectra (fourth-partial dominance ≥${minimumDominance.toFixed(2)}×, repitched-pluck difference ≥${minimumRevoiceDifference.toFixed(2)}); 72 ms post-effects fade across all five presets; held-note suppression; silent release; fresh replay; independent mute/volume; Safari fallback; shared 48-buffer cache and 12-voice limit.`);
 
 if (process.argv.includes('--write-browser-fixture')) {
   await mkdir(new URL('../browser/generated/', import.meta.url), { recursive: true });

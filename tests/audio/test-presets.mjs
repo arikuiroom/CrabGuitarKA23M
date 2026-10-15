@@ -138,7 +138,7 @@ try {
   assert.equal(buffers.get('red'), buffers.get('mint'), 'steel voices can share their source buffer');
   assert.equal(buffers.get('red'), buffers.get('black'), 'metal tone uses the steel excitation');
   assert.notEqual(buffers.get('red'), buffers.get('darkbrown'), 'nylon has its own excitation cache');
-  assert.notEqual(buffers.get('red'), buffers.get('redbrown'), 'ukulele has its own excitation cache');
+  assert.notEqual(buffers.get('red'), buffers.get('redbrown'), 'bossa nylon has its own excitation cache');
   assert.notDeepEqual(buffers.get('darkbrown').getChannelData(0), buffers.get('redbrown').getChannelData(0), 'acoustic timbres differ in waveform, not only EQ');
   for (const id of ['darkbrown', 'redbrown']) {
     instruments.setPreset(id); assert(instruments.pluck(110));

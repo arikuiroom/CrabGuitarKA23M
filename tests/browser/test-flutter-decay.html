@@ -16,7 +16,7 @@ run.onclick=async()=>{
   const w=app.contentWindow,d=w.document,scene=d.querySelector('.scene'),svg=d.querySelector('#instrument');
   svg.setPointerCapture=()=>{};
   const script=d.createElement('script');script.type='module';
-  script.textContent=`import{GuitarAudio}from'./audio.js?v=22';
+  script.textContent=`import{GuitarAudio}from'./audio.js?v=23';
    if(!window.flutterProbe){
     window.flutterProbe={reads:0};
     const unlock=GuitarAudio.prototype.unlock;

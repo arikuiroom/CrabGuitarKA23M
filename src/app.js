@@ -1,6 +1,6 @@
-import {createFreeMode, freeStrings} from './free-mode.js?v=22';
-import {GuitarAudio} from './audio.js?v=22';
-import {mountSpriteParts, SPRITE_URLS, SPRITE_HIT_REGIONS, STRING_SEGMENTS, stringPosition} from './sprite-parts.js?v=20';
+import {createFreeMode, freeStrings} from './free-mode.js?v=23';
+import {GuitarAudio} from './audio.js?v=23';
+import {mountSpriteParts, createSpritePainter, SPRITE_HIT_REGIONS, STRING_SEGMENTS, stringPosition} from './sprite-parts.js?v=23';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const audio=new GuitarAudio();
 const bases=[82.406889,110,146.832384,195.997718,246.941651,329.627557];
@@ -10,10 +10,14 @@ let chord='open',muted=false, plucks=0, playEpoch=0, armPointer=null;
 const pointers=new Map(), keys=new Set(), flashes=new Map(), palmPointers=new Set();
 const board=$('#stringboard'), instrument=$('#instrument'), scene=$('.scene');
 mountSpriteParts(instrument);
+const spriteStatus=document.createElement('span');
+spriteStatus.id='spriteStatus';spriteStatus.setAttribute('role','status');spriteStatus.setAttribute('aria-live','polite');
+$('.preset-controls').append(spriteStatus);
+const spritePainter=createSpritePainter(instrument,{onState:state=>{spriteStatus.hidden=state==='ready';spriteStatus.textContent=state==='loading'?'画像を読み込み中…':state==='error'?'画像を読み込めません。色ボタンで再試行':'';}});
 const {palm: palmRegion, arm: armRegion}=SPRITE_HIT_REGIONS;
 const freeButton=$('#freeMode');
 const freeMode=createFreeMode({
- unlock:()=>audio.unlock(), play:(i,velocity,gate)=>play(i,velocity,false,gate),
+ unlock:()=>audio.unlock(), percussion:(kind,level)=>{if(audio.playPercussion(kind,level))wakeSound()}, silence:()=>audio.stopPercussion(), play:(i,velocity,gate)=>play(i,velocity,false,gate),
  getStrings:preset=>freeStrings(chord,chords[chord],preset), getPreset:()=>scene.dataset.preset,
  canStart:()=>!document.hidden,
  canPlay:(requireRunning=true)=>!document.hidden&&!muted&&audio.volume>0&&!palmPointers.size&&armPointer===null&&(!requireRunning||audio.context?.state==='running'),
@@ -63,7 +67,7 @@ function attach(surface,position){
   if(e.button!==0&&e.pointerType==='mouse')return;const p=position(e);
   if(armPointer!==null&&!p.arm&&!p.palm)return;if(!p.inside&&!p.palm&&!p.arm&&!p.sides)return;if(p.arm&&armPointer!==null)return;
   e.preventDefault();surface.setPointerCapture(e.pointerId);
-  if(p.arm){armPointer=e.pointerId;scene.dataset.armGestures=String(Number(scene.dataset.armGestures||0)+1);++playEpoch;for(const [id,held]of pointers)if(!held.palm){clearTimeout(held.onsetTimer);pointers.delete(id)}const m=$('#actualStrings').getScreenCTM(),ax=m.c-.17*m.a,ay=m.d-.17*m.b,length=Math.hypot(ax,ay);pointers.set(e.pointerId,{surface,arm:true,startX:e.clientX,startY:e.clientY,axisX:ax/length,axisY:ay/length});setArmBend(0);return;}
+  if(p.arm){audio.stopPercussion();armPointer=e.pointerId;scene.dataset.armGestures=String(Number(scene.dataset.armGestures||0)+1);++playEpoch;for(const [id,held]of pointers)if(!held.palm){clearTimeout(held.onsetTimer);pointers.delete(id)}const m=$('#actualStrings').getScreenCTM(),ax=m.c-.17*m.a,ay=m.d-.17*m.b,length=Math.hypot(ax,ay);pointers.set(e.pointerId,{surface,arm:true,startX:e.clientX,startY:e.clientY,axisX:ax/length,axisY:ay/length});setArmBend(0);return;}
   if(p.palm){palmPointers.add(e.pointerId);pointers.set(e.pointerId,{surface,palm:true});dampChanged();return;}
   const held={...p,surface,pending:p.inside&&p.harmonic,maxDistance:0,start:p,startX:e.clientX,startY:e.clientY,started:performance.now()};pointers.set(e.pointerId,held);if(audio.context?.state!=='running')audio.unlock().catch(()=>{});
   if(p.inside&&!p.harmonic)play(index(p));
@@ -100,10 +104,8 @@ window.addEventListener('blur',reset);window.addEventListener('pagehide',reset);
 
 // Effects use one persistent audio graph; UI buttons are siblings of the SVG,
 // so tapping a control never enters the instrument pointer handlers.
-const presets={red:{name:'赤',tone:'澄んだ響き',rgb:null},mint:{name:'ミントグリーン',tone:'ファンク',rgb:[.56,.87,.70]},black:{name:'黒',tone:'メタル',rgb:[.065,.07,.08]},darkbrown:{name:'焦茶',tone:'ナイロン',rgb:[.22,.11,.06]},redbrown:{name:'赤茶色',tone:'軽やかウクレレ',rgb:[.51,.20,.10]}};
-function selectPreset(id){const p=presets[id];if(!p)return;++playEpoch;for(const held of pointers.values())if(held.pending){clearTimeout(held.onsetTimer);held.pending=false;held.cancelled=true;}audio.setPreset(id);scene.dataset.preset=id;$$('button[data-preset]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.preset===id)));$('#harmonicHint').style.display=id==='redbrown'?'none':'';$('#presetName').textContent=`${p.name} · ${p.tone}`;$('#instrument').setAttribute('aria-label',`${p.name}のカニギター。一つの大きなハサミと四本の小さな足。弦にふれると音が出ます。`);for(const image of $$('.painted-sprite')){image.setAttribute('href',SPRITE_URLS[id]);image.setAttributeNS('http://www.w3.org/1999/xlink','xlink:href',SPRITE_URLS[id]);}}
-// Bounded five-resource browser image cache, warmed before the first color change.
-const colorImages=Object.keys(presets).map(id=>{const image=new Image();image.src=SPRITE_URLS[id];image.decode?.().catch(()=>{});return image;});
+const presets={red:{name:'赤',tone:'澄んだ響き',rgb:null},mint:{name:'ミントグリーン',tone:'ファンク',rgb:[.56,.87,.70]},black:{name:'黒',tone:'メタル',rgb:[.065,.07,.08]},darkbrown:{name:'焦茶',tone:'ナイロン',rgb:[.22,.11,.06]},redbrown:{name:'赤茶色',tone:'ボサノバギター',rgb:[.51,.20,.10]}};
+function selectPreset(id){const p=presets[id];if(!p)return;++playEpoch;for(const held of pointers.values())if(held.pending){clearTimeout(held.onsetTimer);held.pending=false;held.cancelled=true;}audio.setPreset(id);scene.dataset.preset=id;$$('button[data-preset]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.preset===id)));$('#harmonicHint').style.display=id==='redbrown'?'none':'';$('#presetName').textContent=`${p.name} · ${p.tone}`;$('#instrument').setAttribute('aria-label',`${p.name}のカニギター。一つの大きなハサミと四本の小さな足。弦にふれると音が出ます。`);void spritePainter.select(id);}
 $$('button[data-preset]').forEach(b=>b.addEventListener('click',()=>selectPreset(b.dataset.preset)));
 selectPreset('red');
 

@@ -83,7 +83,7 @@ try {
   for (const hz of frequencies) {
     assert(uke.pluck(hz, 0.7)); const ordinary = uke.voices.at(-1);
     assert(uke.pluckHarmonic(hz, 0.7)); const touch = uke.voices.at(-1);
-    assert.equal(touch.harmonic, false, 'ukulele API cannot activate harmonics');
+    assert.equal(touch.harmonic, false, 'bossa nylon API cannot activate harmonics');
     assert.equal(touch.source.buffer, ordinary.source.buffer, 'exact same cached normal waveform');
     assert.equal(touch.tone.frequency.value, ordinary.tone.frequency.value);
     assert.deepEqual(touch.gain.gain.events, ordinary.gain.gain.events);
@@ -115,7 +115,7 @@ try {
     assert.deepEqual(electric.voices.at(-1).source.buffer.getChannelData(0), synthesizeHarmonic(110));
   }
 } finally { globalThis.AudioContext = original; }
-console.log(`Nylon/ukulele touch tests passed: 21 soft spectra, fourth/fundamental ≤${highestFourthRatio.toFixed(4)}, late/early RMS ≤${longestDecay.toFixed(3)}; exact normal ukulele API fallback; dry routing, 200 ms gate, bend, cutting, damping, mute, output meter, and distinct fourth-led electric harmonics.`);
+console.log(`Nylon/bossa touch tests passed: 21 soft spectra, fourth/fundamental ≤${highestFourthRatio.toFixed(4)}, late/early RMS ≤${longestDecay.toFixed(3)}; exact normal bossa API fallback; dry routing, 200 ms gate, bend, cutting, damping, mute, output meter, and distinct fourth-led electric harmonics.`);
 
 if (process.argv.includes('--write-browser-fixture')) {
   await mkdir(new URL('../browser/generated/', import.meta.url), { recursive: true });

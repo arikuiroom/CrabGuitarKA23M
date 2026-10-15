@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><title>Backing rhythm native audio checks</title>
+<button id="run">Render rhythm safety checks</button><pre id="result">Ready</pre>
+<script type="module">
+import {GuitarAudio} from '../../dist/audio.js?v=23';
+const assert=(ok,label)=>{if(!ok)throw Error(label)},sr=44100;
+const rms=(pcm,a,b)=>{const section=pcm.subarray(Math.floor(a*sr),Math.floor(b*sr));return Math.sqrt(section.reduce((s,v)=>s+v*v,0)/section.length)};
+async function render(preset,kind){
+ const context=new OfflineAudioContext(2,sr*2,sr);context.resume=()=>Promise.resolve();
+ // Offline rendering has no hardware-running state, but shares the native DSP.
+ Object.defineProperty(context,'state',{value:'running'});globalThis.AudioContext=function(){return context};
+ const audio=new GuitarAudio();audio.setPreset(preset);audio.setVolume(1);await audio.unlock();
+ const pitches=[82.406889,110,146.832384,195.997718,246.941651,329.627557];
+ if(kind==='mix')for(let i=0;i<6;i++)audio.pluck(pitches[i],1,i);
+ for(let i=0;i<6;i++)audio.playPercussion(['kick','snare','hat'][i%3],1);
+ const stopped=context.suspend(.3).then(async()=>{audio.stopAll();await OfflineAudioContext.prototype.resume.call(context)});
+ const buffer=await context.startRendering();await stopped;const pcm=buffer.getChannelData(0);
+ const peak=pcm.reduce((p,v)=>Math.max(p,Math.abs(v)),0),tail=rms(pcm,.5,1.9),attack=rms(pcm,0,.15);
+ assert(pcm.every(Number.isFinite),'finite '+preset);assert(peak<.9,'safe peak '+preset);assert(attack>.0001,'audible '+preset);assert(tail<1e-7,'stop silence '+preset);
+ assert(audio.percussionVoices.size===0,'native ended cleanup '+preset);
+ return {preset,kind,peak,attack,tail,remaining:audio.percussionVoices.size};
+}
+async function runTests(){const original=globalThis.AudioContext;run.disabled=true;try{
+ const rows=[];for(const preset of ['red','mint','black','darkbrown','redbrown']){rows.push(await render(preset,'rhythm'));rows.push(await render(preset,'mix'))}
+ result.textContent=JSON.stringify({passed:true,rows,scope:'Native offline DSP; does not verify speakers, subjective balance or physical touch.'},null,2);
+}catch(e){result.textContent=JSON.stringify({passed:false,error:String(e.stack)},null,2)}finally{globalThis.AudioContext=original;run.disabled=false}}
+run.onclick=runTests;if(new URLSearchParams(location.search).has('auto'))runTests();
+</script>

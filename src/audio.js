@@ -1,8 +1,7 @@
 /**
  * Sample-free acoustic guitar. A plucked string is rendered as damped modes:
  * pluck-position comb, string stiffness, frequency-dependent losses, and a
- * short bridge/pick transient. Synthesis preserves the requested pitch; the
- * ukulele preset explicitly lifts its lower register by one octave.
+ * short bridge/pick transient. All presets preserve the requested guitar pitch.
  * No network, microphone, or third-party audio assets are used.
  */
 const TAU = Math.PI * 2;
@@ -29,16 +28,13 @@ export const GUITAR_PRESETS = Object.freeze(Object.fromEntries(Object.entries({
     cutoff: 4200, drive: 8, clean: 0, distorted: 0.095, output: 1, dry: 1, wet: 0.016 },
   darkbrown: { name: 'Nylon', highpass: 28, bass: 2, mids: 1, treble: -3,
     cutoff: 5800, drive: 1, clean: 1, distorted: 0, output: 0.58, dry: 0.97, wet: 0.055 },
-  redbrown: { name: 'Ukulele', highpass: 120, bass: -5, mids: 3, treble: 4,
-    cutoff: 9500, drive: 1, clean: 1, distorted: 0, output: 1.32, dry: 1, wet: 0.012 },
+  redbrown: { name: 'Bossa Nylon', highpass: 32, bass: 1.5, mids: 1.2, treble: -0.5,
+    cutoff: 6800, drive: 1, clean: 1, distorted: 0, output: 0.66, dry: 0.99, wet: 0.025 },
 }).map(([id, settings]) => [id, Object.freeze({ id, ...settings })])));
 
-/** The ukulele uses a light re-entrant register; pitch classes stay unchanged.
- * 190 Hz sits between F#3 and G3 so rounded/fretted G3 is never lifted.
- * Pure synthesizeTimbre still renders exactly the frequency it is given.
- */
+/** Every color keeps the supplied guitar register, including the bass strings. */
 export function getPlaybackFrequency(frequency, preset) {
-  return preset === 'redbrown' && frequency < 190 ? frequency * 2 : frequency;
+  return frequency;
 }
 
 // A last safety stage is linear at ordinary levels and gently bounds overloads.
@@ -112,7 +108,6 @@ export function createReverbImpulse(sampleRate = 44100, duration = 1.05) {
 }
 
 // These synthesis profiles alter excitation/decay, not the supplied pitch.
-// The ukulele's explicit register mapping is applied separately by the engine.
 // Steel preserves the original red instrument's waveform exactly.
 const PLUCK_TIMBRES = {
   steel: { position: 0.185, stiffness: 0.000018, brightness: 3900, slope: 1.22,
@@ -121,6 +116,10 @@ const PLUCK_TIMBRES = {
   nylon: { position: 0.235, stiffness: 0.000006, brightness: 3200, slope: 1.58,
     decay: 1.3, pitchDecay: 0.16, modeLoss: 0.15, lossPower: 1.35,
     pickDuration: 0.018, pickLevel: 0.006, pickDecay: 0.004, attack: 0.0022, release: 0.055 },
+  // A tighter fingerpicked nylon voice for bossa: rounded bass and clear treble.
+  bossa: { position: 0.215, stiffness: 0.000006, brightness: 3900, slope: 1.48,
+    decay: 0.92, pitchDecay: 0.16, modeLoss: 0.14, lossPower: 1.35,
+    pickDuration: 0.016, pickLevel: 0.0065, pickDecay: 0.004, attack: 0.002, release: 0.055 },
   ukulele: { position: 0.135, stiffness: 0.000003, brightness: 8000, slope: 1.28,
     decay: 0.31, pitchDecay: 0.04, modeLoss: 0.065, lossPower: 1.12,
     pickDuration: 0.012, pickLevel: 0.01, pickDecay: 0.0028, attack: 0.0008, release: 0.035,
@@ -361,6 +360,26 @@ export function synthesizeNylonTouch(frequency, sampleRate = 44100, duration = N
   return output;
 }
 
+/** Short deterministic percussion, precomputed once per context. No samples,
+ * oscillators, effects graph or timer per hit. PCM peaks stay below .05. */
+export function synthesizePercussion(kind, sampleRate = 44100) {
+  const durations = { kick: .18, snare: .13, hat: .045, shaker: .07, tap: .085 };
+  if (!Object.hasOwn(durations, kind) || !Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 192000) throw new RangeError('Invalid percussion buffer');
+  const data = new Float32Array(Math.ceil(durations[kind] * sampleRate));
+  let seed = 0x723ab19, previous = 0;
+  for (let i = 0; i < data.length; i++) {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+    const noise = (seed >>> 0) / 2147483648 - 1, t = i / sampleRate;
+    const high = (noise - previous) * .5; previous = noise;
+    const envelope = Math.min(1, t / .002) * Math.exp(-t * (kind === 'kick' ? 28 : 50)) * Math.min(1, (data.length - 1 - i) / (sampleRate * .008));
+    const wave = kind === 'kick' ? Math.sin(TAU * (48 * t + 1.8 * (1 - Math.exp(-30 * t))))
+      : kind === 'tap' ? .65 * Math.sin(TAU * 330 * t) + .35 * high
+      : kind === 'snare' ? .75 * noise + .25 * Math.sin(TAU * 175 * t) : high;
+    data[i] = wave * envelope * .048;
+  }
+  return data;
+}
+
 export class GuitarAudio {
   constructor() {
     this.context = null;
@@ -391,6 +410,9 @@ export class GuitarAudio {
     this.bend = 0;
     this.bendEnvelope = { from: 0, to: 0, start: 0, end: 0 };
     this.cache = new Map();
+    this.percussionBuffers = new Map();
+    this.percussionVoices = new Set();
+    this.maxPercussionVoices = 6;
   }
 
   /** Call from pointerdown/keydown. Creation and resume occur in that gesture. */
@@ -404,6 +426,13 @@ export class GuitarAudio {
         this.outputAnalyser = null;
         this.outputSamples = null;
         this.cache.clear();
+        for (const voice of this.percussionVoices) this._endPercussion(voice);
+        this.percussionBuffers.clear();
+        for (const kind of ['kick', 'snare', 'hat', 'shaker', 'tap']) {
+          const pcm = synthesizePercussion(kind, this.context.sampleRate);
+          const buffer = this.context.createBuffer(1, pcm.length, this.context.sampleRate);
+          buffer.getChannelData(0).set(pcm); this.percussionBuffers.set(kind, buffer);
+        }
         this.voices = [];
         this.stringVoices.fill(null);
         this.liveVoices.clear();
@@ -483,7 +512,7 @@ export class GuitarAudio {
     return this._pluck(frequency, velocity, false, false, 0, stringIndex, gate);
   }
 
-  /** Nylon uses a woody stopped touch; ukulele always plays its ordinary note. */
+  /** Dark nylon uses a woody stopped touch; bossa nylon plays its ordinary note. */
   pluckHarmonic(frequency, velocity = 0.7, stringIndex) {
     return this.preset === 'redbrown' ? this.pluck(frequency, velocity, stringIndex)
       : this._pluck(frequency, velocity, true, false, 0, stringIndex);
@@ -535,7 +564,7 @@ export class GuitarAudio {
     if (frequency >= context.sampleRate * 0.45) return false;
     const shortHarmonic = harmonic && this.preset === 'darkbrown';
     const dryOnly = cut || shortHarmonic;
-    const timbre = this.preset === 'darkbrown' ? 'nylon' : this.preset === 'redbrown' ? 'ukulele' : 'steel';
+    const timbre = this.preset === 'darkbrown' ? 'nylon' : this.preset === 'redbrown' ? 'bossa' : 'steel';
     const key = `${cut ? 'cut' : shortHarmonic ? 'nylon-touch' : harmonic ? 'harmonic' : 'normal'}:${shortHarmonic ? 'nylon' : harmonic ? 'pinch' : timbre}:${frequency.toFixed(5)}:${context.sampleRate}`;
     let buffer = this.cache.get(key);
     if (!buffer) {
@@ -906,6 +935,41 @@ export class GuitarAudio {
     this._applyPreset();
   }
 
+  playPercussion(kind, level = .5) {
+    const context = this.context, buffer = this.percussionBuffers.get(kind);
+    if (!buffer || context?.state !== 'running' || this.muted || this.damped || this.volume <= 0 || !Number.isFinite(level) || level <= 0) return false;
+    while (this.percussionVoices.size >= this.maxPercussionVoices) this._endPercussion(this.percussionVoices.values().next().value);
+    const source = context.createBufferSource(), gain = context.createGain();
+    source.buffer = buffer; gain.gain.value = clamp(level, 0, 1);
+    source.connect(gain); gain.connect(this.compressor); // Same final safety, mute and volume; no guitar coloration.
+    const voice = { source, gain }; this.percussionVoices.add(voice);
+    source.onended = () => this._endPercussion(voice, false);
+    const start = Math.max(context.currentTime, this.dampSafeAt);
+    if (this.damperClosed) { this._ramp(this.damper.gain, 1, start, .012, true); this.damperClosed = false; }
+    source.start(start); source.stop(start + buffer.length / context.sampleRate);
+    return true;
+  }
+
+  _endPercussion(voice, stop = true) {
+    if (!this.percussionVoices.delete(voice)) return;
+    voice.source.onended = null;
+    if (stop) { try { voice.source.stop(this.context.currentTime); } catch (_) { /* ended */ } }
+    voice.source.disconnect(); voice.gain.disconnect();
+  }
+
+  stopPercussion() {
+    if (!this.context) return;
+    const now = this.context.currentTime;
+    for (const voice of this.percussionVoices) {
+      if (voice.releasing) continue;
+      voice.releasing = true;
+      voice.gain.gain.cancelScheduledValues(now);
+      voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
+      voice.gain.gain.linearRampToValueAtTime(0, now + .01);
+      try { voice.source.stop(now + .01); } catch (_) { this._endPercussion(voice, false); }
+    }
+  }
+
   mute(muted = true) {
     this.muted = Boolean(muted);
     if (this.master) this._smooth(this.master.gain, this.muted ? 0 : this.volume, 0.012);
@@ -915,6 +979,7 @@ export class GuitarAudio {
   setVolume(volume) {
     if (!Number.isFinite(volume)) return;
     this.volume = clamp(volume, 0, 1);
+    if (this.volume === 0) this.stopPercussion();
     if (this.master && !this.muted) {
       this._smooth(this.master.gain, this.volume, 0.012);
     }
@@ -930,6 +995,7 @@ export class GuitarAudio {
   }
 
   stopAll() {
+    this.stopPercussion();
     this._chokeAll(CHOKE_TIME);
   }
 

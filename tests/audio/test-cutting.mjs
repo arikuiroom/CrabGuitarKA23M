@@ -130,19 +130,19 @@ try {
     for (const voice of [...audio.liveVoices]) voice.source.onended();
     assert.equal(audio.voices.length, 0); assert.equal(audio.liveVoices.size, 0);
   }
-  const ukulele = new GuitarAudio(); ukulele.setPreset('redbrown'); await ukulele.unlock();
+  const bossa = new GuitarAudio(); bossa.setPreset('redbrown'); await bossa.unlock();
   const open = [82.406889, 110, 146.832384, 195.997718, 246.941651, 329.627557];
   for (const [index, frequency] of open.entries()) {
-    assert(ukulele.pluck(frequency));
-    const voice = ukulele.voices.at(-1), sounding = frequency * (index < 3 ? 2 : 1);
+    assert(bossa.pluck(frequency));
+    const voice = bossa.voices.at(-1), sounding = frequency;
     assert.equal(voice.playbackFrequency, sounding);
-    assert.deepEqual(voice.source.buffer.getChannelData(0), synthesizeTimbre(sounding, 44100, 3, 'ukulele'),
-      'the actual source waveform uses the disclosed octave-mapped pitch');
+    assert.deepEqual(voice.source.buffer.getChannelData(0), synthesizeTimbre(sounding, 44100, 3, 'bossa'),
+      'bossa source waveform preserves the full guitar register');
   }
   for (const frequency of [195.9977, 195.997718, 196, 146.832384 * 2 ** (5 / 12)]) {
     assert.equal(getPlaybackFrequency(frequency, 'redbrown'), frequency, 'rounded or fretted G3 never accidentally octave-lifts');
   }
-  assert.equal(getPlaybackFrequency(184.997211, 'redbrown'), 369.994422, 'F-sharp 3 remains in the lifted lower register');
+  assert.equal(getPlaybackFrequency(184.997211, 'redbrown'), 184.997211, 'F-sharp 3 remains at the requested guitar pitch');
   for (const preset of ['red', 'mint', 'black', 'darkbrown']) assert.equal(getPlaybackFrequency(110, preset), 110);
   const nylon = new GuitarAudio(); nylon.setPreset('darkbrown'); await nylon.unlock();
   nylon.pluck(110, 0.8);

@@ -36,7 +36,7 @@ function pitch(data, hz, sr) {
 let maxCents = 0;
 for (const sr of [44100, 48000]) for (const hz of [82.406889, 110, 146.832384, 195.997718, 246.941651, 329.627557]) {
   const rows = {};
-  for (const timbre of ['steel', 'nylon', 'ukulele']) {
+  for (const timbre of ['steel', 'nylon', 'ukulele', 'bossa']) {
     const samples = synthesizeTimbre(hz, sr, 2, timbre);
     assert.equal(samples.length, sr * 2);
     assert.equal(samples[0], 0); assert.equal(samples.at(-1), 0);
@@ -53,6 +53,10 @@ for (const sr of [44100, 48000]) for (const hz of [82.406889, 110, 146.832384, 1
     };
     if (timbre === 'steel') assert.deepEqual(samples, synthesize(hz, sr, 2));
   }
+  assert(rows.bossa.centroid > rows.nylon.centroid, 'bossa nylon has a clearer attack than dark nylon');
+  assert(rows.bossa.centroid < rows.steel.centroid, 'bossa retains rounded nylon rather than steel-string brightness');
+  assert(rows.bossa.decay < rows.nylon.decay * 0.85, 'bossa phrasing has a tighter natural decay');
+  assert(rows.bossa.decay > rows.ukulele.decay * 2, 'bossa keeps a guitar body rather than a short ukulele plonk');
   assert(rows.nylon.centroid < rows.steel.centroid * 0.8, 'nylon has a clearly rounder string spectrum');
   assert(rows.nylon.decay > rows.steel.decay * 1.12, 'nylon low modes sing instead of sounding like the short ukulele');
   assert(rows.ukulele.centroid > rows.steel.centroid * 1.05, 'ukulele has a brighter plucked attack');
@@ -67,7 +71,7 @@ assert.equal(GUITAR_PRESETS.black.drive, 8); assert.equal(GUITAR_PRESETS.black.c
 for (const id of ['darkbrown', 'redbrown']) {
   assert.equal(GUITAR_PRESETS[id].clean, 1); assert.equal(GUITAR_PRESETS[id].distorted, 0);
 }
-console.log(`Instrument synthesis tests passed: 36 six-string/rate/timbre checks; nylon is rounder and longer, ukulele brighter and shorter; exact requested pitches (max ${maxCents.toFixed(2)} cents), finite click-free buffers, clean acoustic branches, and high-gain metal.`);
+console.log(`Instrument synthesis tests passed: 48 six-string/rate/timbre checks; nylon is rounder and longer, bossa clearer and tighter, legacy ukulele brighter and shorter; exact requested pitches (max ${maxCents.toFixed(2)} cents), finite click-free buffers, clean acoustic branches, and high-gain metal.`);
 
 if (process.argv.includes('--write-browser-fixture')) {
   await mkdir(new URL('../browser/generated/', import.meta.url), { recursive: true });
@@ -139,7 +143,7 @@ async function renderBrowser(moduleUrl) {
     }
     const acousticDecay = [44100, 48000].every(sr => {
       const rows = results.filter(row => row.sampleRate === sr);
-      return rows.find(row => row.id === 'redbrown').decayRatio < rows.find(row => row.id === 'darkbrown').decayRatio * 0.5;
+      return rows.find(row => row.id === 'redbrown').decayRatio < rows.find(row => row.id === 'darkbrown').decayRatio * 0.85;
     });
     return { passed: results.every(row => row.passed) && differences.every(row => row.normalizedRms > 0.12) && acousticDecay,
       acousticDecay, results, differences };

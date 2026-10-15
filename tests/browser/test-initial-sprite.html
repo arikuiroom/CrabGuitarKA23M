@@ -1,0 +1,21 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Initial sprite paint</title>
+<button id="run">Test first paint and rapid color changes</button><pre id="result">Ready</pre>
+<iframe id="app" title="Fresh mobile-size guitar" style="width:390px;height:844px;border:1px solid #ccc"></iframe>
+<script>
+const pause=ms=>new Promise(r=>setTimeout(r,ms));
+async function until(predicate,label){const deadline=Date.now()+20000;while(Date.now()<deadline){if(predicate())return;await pause(25);}throw Error('Timeout: '+label);}
+run.onclick=async()=>{run.disabled=true;try{
+ app.src='../../dist/index.html?initialPaint='+Date.now();
+ await until(()=>app.contentDocument?.querySelector('#instrument')?.dataset.spriteState==='ready','initial image ready');
+ const d=app.contentDocument,svg=d.querySelector('#instrument');
+ function check(id){const images=[...svg.querySelectorAll('.painted-sprite')];if(images.length!==7)throw Error('Expected seven direct images');for(const image of images){if(image.tagName!=='image'||!image.getAttribute('href').includes('/'+id+'.png')||image.getAttribute('href')!==image.getAttributeNS('http://www.w3.org/1999/xlink','href'))throw Error('Image mismatch '+id);}if(svg.querySelector('use,filter'))throw Error('Unexpected use/filter');if(!svg.getBoundingClientRect().height)throw Error('SVG hidden');}
+ check('red');
+ const initialResources=app.contentWindow.performance.getEntriesByType('resource').map(e=>e.name).filter(u=>/\/sprites\/[^/]+\.png/.test(u));
+ if(initialResources.some(u=>!u.includes('/red.png')))throw Error('Unselected sheets preloaded');
+ const firstPaint={state:svg.dataset.spriteState,images:7,initialResources,loadingLabelHidden:d.querySelector('#spriteStatus').hidden};
+ for(const id of ['mint','darkbrown','redbrown','black'])d.querySelector(`button[data-preset="${id}"]`).click();
+ await until(()=>svg.dataset.spriteState==='ready'&&svg.dataset.spriteDisplayed==='black','latest color ready');check('black');
+ for(const id of ['mint','darkbrown','redbrown','red']){d.querySelector(`button[data-preset="${id}"]`).click();await until(()=>svg.dataset.spriteState==='ready'&&svg.dataset.spriteDisplayed===id,id+' ready');check(id);}
+ await pause(100);result.textContent=JSON.stringify({passed:true,firstPaint,latestColorWins:true,allColorsReady:true,finalColor:'red',visualCheck:'Inspect the iframe: seven-part red guitar must be visible without pressing a color button.'},null,2);
+}catch(e){result.textContent=e.stack;}finally{run.disabled=false;}};
+</script></html>
